@@ -1,0 +1,394 @@
+{
+  "author": "AI Identity Incorported <james@aiii.id>",
+  "cache_budget_parity": {
+    "29": {
+      "files_bitwise_identical": {
+        "final-hidden.f32": true,
+        "layer-0.f32": true,
+        "layer-1.f32": true,
+        "layer-10.f32": true,
+        "layer-11.f32": true,
+        "layer-12.f32": true,
+        "layer-13.f32": true,
+        "layer-14.f32": true,
+        "layer-15.f32": true,
+        "layer-16.f32": true,
+        "layer-17.f32": true,
+        "layer-18.f32": true,
+        "layer-19.f32": true,
+        "layer-2.f32": true,
+        "layer-3.f32": true,
+        "layer-4.f32": true,
+        "layer-5.f32": true,
+        "layer-6.f32": true,
+        "layer-7.f32": true,
+        "layer-8.f32": true,
+        "layer-9.f32": true,
+        "logits.f32": true,
+        "routes.tsv": true
+      },
+      "passed": true
+    },
+    "4": {
+      "files_bitwise_identical": {
+        "final-hidden.f32": true,
+        "layer-0.f32": true,
+        "layer-1.f32": true,
+        "layer-10.f32": true,
+        "layer-11.f32": true,
+        "layer-12.f32": true,
+        "layer-13.f32": true,
+        "layer-14.f32": true,
+        "layer-15.f32": true,
+        "layer-16.f32": true,
+        "layer-17.f32": true,
+        "layer-18.f32": true,
+        "layer-19.f32": true,
+        "layer-2.f32": true,
+        "layer-3.f32": true,
+        "layer-4.f32": true,
+        "layer-5.f32": true,
+        "layer-6.f32": true,
+        "layer-7.f32": true,
+        "layer-8.f32": true,
+        "layer-9.f32": true,
+        "logits.f32": true,
+        "routes.tsv": true
+      },
+      "passed": true
+    }
+  },
+  "candidate_domain": "original BF16 matrix weights and original FP32 expert bias; GPU BF16 GEMV; CPU FP32 attention/routing; FP32 working state",
+  "checkpoint": {
+    "config_sha256": "1d1ac183143a4288bcc3b86c8a6a868ecbfb0d7d7173845159ce69d3b3e16599",
+    "index_sha256": "2266f0718866d200fc2a7dea9a1a7624ff680a5d130126a7b27d1dc148f539da",
+    "model": "Ring-mini-2.0",
+    "original_modeling_sha256": "2f73b14e5f9f56c5e78df01813bddce43e856ffe4fdcfcd77ec0a3a2111cd1dd",
+    "shards": {
+      "model-00001-of-00004.safetensors": {
+        "header_bytes": 591736,
+        "header_sha256": "64849a709993f776d967cb17be4210e6e1ad303e61684945d0a9f3d0aecf829d",
+        "sha256": "835f1b7ee15389f110d8be35c0d21b6e5d5af321fa5182a6a2cb1889fc7fd5f5",
+        "size": 9999812472
+      },
+      "model-00002-of-00004.safetensors": {
+        "header_bytes": 593112,
+        "header_sha256": "bf4d1aca1ea00f402f6efb1d8918d5327b3b1414a2a3bd8d88ec48dbfe160fd3",
+        "sha256": "cd837407ff9d544e58d49d0fc04566cdccda73c0e0e8da94b91b50a764d1eb31",
+        "size": 9999813848
+      },
+      "model-00003-of-00004.safetensors": {
+        "header_bytes": 547400,
+        "header_sha256": "2c9f0b7fe7d3428371ea88263a18981b50f01147831cbbbfd05f61d707cd9c6c",
+        "sha256": "f104defce6e603bca7a62448ac8404b47c360fb87ffde31c2d6ba550d7bee98b",
+        "size": 9999878728
+      },
+      "model-00004-of-00004.safetensors": {
+        "header_bytes": 106256,
+        "header_sha256": "d025a57e135dc19aad646a114f9249b374f449741450cb67f85b9f422abf4f02",
+        "sha256": "d3426631ac28f1ff8a4b870c9de3b64acc899268d846f3b56f1a0b66e8b5923a",
+        "size": 2513629968
+      }
+    }
+  },
+  "executable_sha256": "499368471a392493a713c8a25c9839f9704781e5e2d998e75b5368a5d0b70f6e",
+  "experts_per_decision": 8,
+  "hardware": "RTX 4070 Ti, 12 GiB VRAM, CUDA architecture 89",
+  "model_layers": 20,
+  "passed": true,
+  "plan_sha256": "64fbf030b5cf3a3f7bdb60d0b3d9b83b029c9d2212852c2a4332e5c4135ed7e0",
+  "qualified_at": "2026-10-16T09:16:15.348065+00:00",
+  "quantization": false,
+  "reference_domain": "original checkpoint decoder implementation, CPU FP32; BF16 values widened exactly",
+  "runs": [
+    {
+      "cache_mib": 1024,
+      "case": "4",
+      "comparison": {
+        "layers": 20,
+        "max_errors": {
+          "final_hidden_max_abs": 7.62939453125e-05,
+          "hidden_layers_max_abs": 0.009765625,
+          "logits_max_abs": 4.100799560546875e-05,
+          "route_weight_max_abs": 2.864451293937975e-06
+        },
+        "passed": true,
+        "route_count": 76,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 4,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      },
+      "execution": {
+        "activation_dtype": "FP32",
+        "cache_budget_bytes": 1073741824,
+        "cache_device_payload_bytes": 1069547520,
+        "cache_evictions": 349,
+        "cache_hits": 89,
+        "cache_host_payload_bytes": 1069547520,
+        "cache_misses": 519,
+        "cache_payload_scope": "resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers",
+        "cache_resident_bytes": 1069547520,
+        "checkpoint_id": "087b318222f4589695e4aaaf6460169d15030b8c1c6cb35a25247c9865069eb2",
+        "host_kv_capacity_bytes": 327680,
+        "layers": 20,
+        "model": "Ring-mini-2.0",
+        "quantized": false,
+        "status": "executed",
+        "token_ids": [
+          156890,
+          128,
+          256,
+          1024
+        ],
+        "tokens": 4,
+        "wall_seconds": 1.544555498,
+        "workspace_bytes": 644474880
+      },
+      "provenance_sha256": "bc0e183eee8f0c064647f5a7b67348928aba216fad976492e36a9b8b763f2e5b"
+    },
+    {
+      "cache_mib": 6,
+      "case": "4",
+      "comparison": {
+        "layers": 20,
+        "max_errors": {
+          "final_hidden_max_abs": 7.62939453125e-05,
+          "hidden_layers_max_abs": 0.009765625,
+          "logits_max_abs": 4.100799560546875e-05,
+          "route_weight_max_abs": 2.864451293937975e-06
+        },
+        "passed": true,
+        "route_count": 76,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 4,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      },
+      "execution": {
+        "activation_dtype": "FP32",
+        "cache_budget_bytes": 6291456,
+        "cache_device_payload_bytes": 6291456,
+        "cache_evictions": 607,
+        "cache_hits": 0,
+        "cache_host_payload_bytes": 6291456,
+        "cache_misses": 608,
+        "cache_payload_scope": "resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers",
+        "cache_resident_bytes": 6291456,
+        "checkpoint_id": "087b318222f4589695e4aaaf6460169d15030b8c1c6cb35a25247c9865069eb2",
+        "host_kv_capacity_bytes": 327680,
+        "layers": 20,
+        "model": "Ring-mini-2.0",
+        "quantized": false,
+        "status": "executed",
+        "token_ids": [
+          156890,
+          128,
+          256,
+          1024
+        ],
+        "tokens": 4,
+        "wall_seconds": 1.288191431,
+        "workspace_bytes": 644474880
+      },
+      "provenance_sha256": "f35f1f6a2be72cd026abbd18a8229d285b48d2c8f395de7d576b8e05fbc924e1"
+    },
+    {
+      "cache_mib": 1024,
+      "case": "29",
+      "comparison": {
+        "layers": 20,
+        "max_errors": {
+          "final_hidden_max_abs": 0.00032806396484375,
+          "hidden_layers_max_abs": 0.00927734375,
+          "logits_max_abs": 0.0001049041748046875,
+          "route_weight_max_abs": 3.814702758786481e-06
+        },
+        "passed": true,
+        "route_count": 551,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 29,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      },
+      "execution": {
+        "activation_dtype": "FP32",
+        "cache_budget_bytes": 1073741824,
+        "cache_device_payload_bytes": 1069547520,
+        "cache_evictions": 2988,
+        "cache_hits": 1250,
+        "cache_host_payload_bytes": 1069547520,
+        "cache_misses": 3158,
+        "cache_payload_scope": "resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers",
+        "cache_resident_bytes": 1069547520,
+        "checkpoint_id": "087b318222f4589695e4aaaf6460169d15030b8c1c6cb35a25247c9865069eb2",
+        "host_kv_capacity_bytes": 2375680,
+        "layers": 20,
+        "model": "Ring-mini-2.0",
+        "quantized": false,
+        "status": "executed",
+        "token_ids": [
+          157151,
+          39,
+          116171,
+          157152,
+          2372,
+          341,
+          220,
+          16,
+          22,
+          7960,
+          220,
+          17,
+          20,
+          30,
+          22968,
+          391,
+          1191,
+          268,
+          1788,
+          13,
+          157151,
+          8469,
+          7342,
+          5468,
+          157152,
+          27,
+          30583,
+          29,
+          198
+        ],
+        "tokens": 29,
+        "wall_seconds": 8.396453846,
+        "workspace_bytes": 644474880
+      },
+      "provenance_sha256": "10e3407dba267fccaa0f01dcd6a892516e5c3a65964d77bc2e78f9fe00fd3af2"
+    },
+    {
+      "cache_mib": 6,
+      "case": "29",
+      "comparison": {
+        "layers": 20,
+        "max_errors": {
+          "final_hidden_max_abs": 0.00032806396484375,
+          "hidden_layers_max_abs": 0.00927734375,
+          "logits_max_abs": 0.0001049041748046875,
+          "route_weight_max_abs": 3.814702758786481e-06
+        },
+        "passed": true,
+        "route_count": 551,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 29,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      },
+      "execution": {
+        "activation_dtype": "FP32",
+        "cache_budget_bytes": 6291456,
+        "cache_device_payload_bytes": 6291456,
+        "cache_evictions": 4407,
+        "cache_hits": 0,
+        "cache_host_payload_bytes": 6291456,
+        "cache_misses": 4408,
+        "cache_payload_scope": "resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers",
+        "cache_resident_bytes": 6291456,
+        "checkpoint_id": "087b318222f4589695e4aaaf6460169d15030b8c1c6cb35a25247c9865069eb2",
+        "host_kv_capacity_bytes": 2375680,
+        "layers": 20,
+        "model": "Ring-mini-2.0",
+        "quantized": false,
+        "status": "executed",
+        "token_ids": [
+          157151,
+          39,
+          116171,
+          157152,
+          2372,
+          341,
+          220,
+          16,
+          22,
+          7960,
+          220,
+          17,
+          20,
+          30,
+          22968,
+          391,
+          1191,
+          268,
+          1788,
+          13,
+          157151,
+          8469,
+          7342,
+          5468,
+          157152,
+          27,
+          30583,
+          29,
+          198
+        ],
+        "tokens": 29,
+        "wall_seconds": 8.663181315,
+        "workspace_bytes": 644474880
+      },
+      "provenance_sha256": "f8639ce060fbd4d6ed34bdec0dc384dd64717fb98a7aa19920b10a9c1213873e"
+    }
+  ],
+  "schema": "strata-ring-reference-qualification-v1",
+  "scope": [
+    "Two short token-ID sequences of 4 and 29 positions; not a task accuracy benchmark.",
+    "No native BF16-activation parity claim.",
+    "No production server, tokenizer, generation scheduler, long-context or training qualification.",
+    "CPU attention and routing; GPU matrix products.",
+    "Reported forward times are diagnostic, not a controlled cache speed comparison.",
+    "No service stops or model promotions. Ling not executed."
+  ],
+  "source_sha256": {
+    "include/strata/kernels/bf16_bits.hpp": "813b51f17c5c264d642f4d77b3d6e5f35e7ea7310ba87b18b3a2a5bc9185198f",
+    "include/strata/kernels/bf16_gemv.hpp": "97e5fac5c5b8dbd86b4e104bf4b69155424bc6d28d0a991240bd9912349f6e6f",
+    "include/strata/kernels/pdl.hpp": "fd3e1d2122aa3c8dbd2abd45089139e8f22852664c75b694acf7f96903d07c08",
+    "include/strata/ring/attention.hpp": "1c9109e925202a659c9bf5290d36d8b9a56923537f72517a72f809d100c34722",
+    "include/strata/ring/expert_cache.hpp": "c67b93090d9326a5409f3ee30a8f2cac268cccb7d5cf884fd1bee5d98f2b6735",
+    "include/strata/ring/numerics.hpp": "d70f515a83a695907e344825d37d9ea5780705f0454d67b6ec102a5b68ccf93a",
+    "include/strata/ring/routing.hpp": "bd4dad6941029ebef5e70363273239f8c161e41675a22bd3191b6de0f698c2ea",
+    "include/strata/ring/tensor_store.hpp": "6591dae3924efab194887311f4df51f7efa630a764a7855249f8d4637723e7c9",
+    "src/kernels/cuda/native_bf16.cu": "ddb35a48c6372a85a5b2dff3ca56dd1fc9a76e800beb2f897d0c2c96d2b63093",
+    "src/kernels/cuda/s26_tsum.cuh": "9d48c241a67096c4d57d10e0a0e7f8f20197ac91754c32889527c0550ce0a695",
+    "src/ring/attention.cpp": "2596b5420d73049c54a80ad0905424cd2453012648dcf646f071554761e502da",
+    "src/ring/engine.cu": "a69521edf6adad6c7369938b1966e213eca801d3355a01e862bd6dbdc33056d6",
+    "src/ring/expert_cache.cpp": "6c687739b6410e90d70571efa98a26d412943bb81a1065eb9dd1f55b0a6e5efa",
+    "src/ring/routing.cpp": "7c65aa4daded52666648ac96eb285c08825f0f066d8bfc6dc43ef4af39c2a4af",
+    "src/ring/tensor_store.cpp": "53c91ca9590f865bdc06fa64d8365c815dc9826bd87628c8d5a54690752457b4",
+    "tools/ling_ring_bf16/CMakeLists.txt": "79f90e46324fa630d42c3479bf085464a2e74917894db4c6ba7e2efdb23d5058",
+    "tools/ling_ring_bf16/compare_ring_reference.py": "d1d066c060fb77e09b334f6b3413791374b2fa71ba30bec284d59191012aec90",
+    "tools/ling_ring_bf16/export_expert_fixture.py": "0d7da77c30b3eeebe8b0cb88f6be1679406551ea71c202be6e95c3ea52c523a8",
+    "tools/ling_ring_bf16/inspect_checkpoint.py": "9e1cc85fc2cecea49dbca266c8923c065364a6d9a6fe010f78efcd32c3cda9c2",
+    "tools/ling_ring_bf16/prepare_ring_manifest.py": "f0c4e4e29b160785611a73ec89c48eb6dfdf7dfc587fd83c7c4147ad332b616e",
+    "tools/ling_ring_bf16/ring_original_reference.py": "a1df03a30084126135263dfd2ba30035503f0b4df2c57e0969f77aaed5635eef",
+    "tools/ling_ring_bf16/run_ring_verified.py": "acc83814e67f1d25412efc88985e8db750982c9feb4db19e31deda94351d7cdb"
+  },
+  "tests": {
+    "cpp_suites_passed": 5,
+    "python_passed": 59
+  },
+  "unique_route_decisions": 627,
+  "unique_token_positions": 33
+}
