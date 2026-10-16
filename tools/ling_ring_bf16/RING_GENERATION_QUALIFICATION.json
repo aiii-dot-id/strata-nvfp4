@@ -139,6 +139,87 @@
   ],
   "expert_cache_replay_bitwise": true,
   "cancellation_passed": true,
+  "optional_matmul_diagnostic": {
+    "backend": "fp32-cublas",
+    "diagnostic_only": true,
+    "promotion": false,
+    "quantized": false,
+    "temporary_fp32_weight_scratch_bytes": 1287651328,
+    "executable_sha256": "30df55ecd84b668b2e33d4d9510085d23e4757694e89941c9fd4b4e4848d5001",
+    "protocol": "/work/AI/experiments/ring-cublas-qualification-20261016/run.py",
+    "environment": {
+      "OMP_NUM_THREADS": "4",
+      "NVIDIA_TF32_OVERRIDE": "0",
+      "cache_mib": 1024,
+      "native_timeout_seconds": 600,
+      "reference_timeout_seconds": 1200,
+      "reference": "CUDA cached original Ring reference"
+    },
+    "tests": {
+      "ring_cpu_ctest": "6/6",
+      "strict_comparator": "unchanged ring-reference-compare-v1"
+    },
+    "cases": [
+      {
+        "evaluated_positions": 4,
+        "passed": true,
+        "route_mismatches": 0,
+        "top1_exact": true,
+        "hidden_max_abs": 0.001953125,
+        "final_hidden_max_abs": 0.0000152587890625,
+        "logits_max_abs": 0.0000057220458984375
+      },
+      {
+        "evaluated_positions": 173,
+        "passed": false,
+        "first_route_mismatch": {"position": 172, "layer": 7, "reference_expert": 227, "candidate_expert": 241},
+        "top1_exact": true,
+        "hidden_max_abs": 0.698699951171875,
+        "final_hidden_max_abs": 0.11488723754882812,
+        "logits_max_abs": 0.055156707763671875
+      }
+    ],
+    "not_run_after_failure": [519, 1031],
+    "default_backend_regression": {
+      "evaluated_positions": 4,
+      "passed_bitwise": true,
+      "elapsed_seconds": 38.589308683003765,
+      "result_sha256": "9cb0eb2e8fdc521ca7cc744e7a9b5a31e108443c6339497befbda57c06a9adf2",
+      "result_path": "/work/AI/experiments/ring-cublas-qualification-20261016/default-regression4/RESULT.json"
+    }
+  },
+  "historical_cached_cuda_evidence": {
+    "reference": "original Ring CUDA cached reference; unchanged strict comparator",
+    "cases": [
+      {
+        "evaluated_positions": 135,
+        "passed": true,
+        "route_rows": 2565,
+        "result_path": "/work/AI/experiments/ring-cached-20261016-r1/case-128/compare/result.json",
+        "result_sha256": "04c898cd71d3f88a26982b394023281a206a1418f28301d69cdfcd5f4008134b"
+      },
+      {
+        "evaluated_positions": 519,
+        "passed": false,
+        "first_route_mismatch": {"position": 172, "layer": 7, "reference_expert": 227, "candidate_expert": 241},
+        "result_path": "/work/AI/experiments/ring-cached-20261016-r1/case-512/compare/result.json",
+        "result_sha256": "42937b64c71bb85c9310511e319400d030f8cf08dc1478e371de3193e9048f27"
+      },
+      {
+        "evaluated_positions": 173,
+        "passed": false,
+        "first_route_set_flip": {"position": 172, "layer": 7, "reference_expert": 227, "candidate_expert": 241},
+        "result_path": "/work/AI/experiments/ring-cached-20261016-r2/probe173/compare/result.json",
+        "result_sha256": "f21f4d6187a54e4e84382eceb3c6ffca652ea794ff5226b8afe70e52990ab9d9"
+      }
+    ],
+    "full_cpu_cuda_diagnostics": {
+      "evidence_root": "/work/AI/experiments/ring-generation-20261016-r2",
+      "fp64_input_rounding_diagnostic": "cpu-native512-diagnostic.json",
+      "fp64_input_rounding_diagnostic_sha256": "e245132ca6699ff0b0ae40064d6bdf96d49c931775e56d4d9c6b3a1d5b58f099",
+      "interpretation": "upstream pre-router input rounding dominates the near-tie; sigmoid is not the primary next fix"
+    }
+  },
   "evidence_root": "/work/AI/experiments/ring-generation-20261016-r2",
   "evidence_sha256": {
     "PLAN.json": "1d49d7629aa950cb99d8dd2c6c3a971a22083b56b0c04ab09cca615cdfb3076d",

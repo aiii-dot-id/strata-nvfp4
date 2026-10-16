@@ -38,10 +38,64 @@ choices match. Diagnostics show that upstream rounding can switch an almost
 tied expert at that point. This establishes a portability issue in the
 reference itself; it does not excuse every native discrepancy.
 
+### Optional FP32-cuBLAS diagnostic
+
+An optional candidate executable was exercised with `--matmul fp32-cublas`.
+It widens each resident BF16 matrix into a temporary FP32 weight buffer of
+1,287,651,328 bytes (about 1.2 GiB), uses pedantic cuBLAS math with atomics
+disabled, and keeps the same 1,024 MiB expert-cache budget. This is a
+diagnostic backend, not an optimization claim or promotion path.
+
+The executable SHA-256 is
+`30df55ecd84b668b2e33d4d9510085d23e4757694e89941c9fd4b4e4848d5001`.
+The external protocol is pinned by
+`/work/AI/experiments/ring-cublas-qualification-20261016/run.py`, with fresh
+output directories, CUDA cached original references, `OMP_NUM_THREADS=4`,
+`NVIDIA_TF32_OVERRIDE=0`, 600-second native and 1,200-second reference
+timeouts, and the unchanged strict comparator. The Ring CPU CTest suite
+remained 6/6 before this optional run.
+
+The 4-position cuBLAS candidate passed strict comparison (hidden max
+`0.001953125`, final max `0.0000152587890625`, logits max
+`0.0000057220458984375`, zero route mismatches). The 173-position candidate
+failed at the same position 172/layer 7 expert flip, 227 versus 241, as the
+default backend; all top-1 choices remained exact. The 519- and 1,031-position
+cuBLAS candidates were not run after that failure. A separate default-backend
+4-position regression subsequently passed bitwise against its frozen expected
+outputs in 38.59 seconds; its result SHA-256 is
+`9cb0eb2e8fdc521ca7cc744e7a9b5a31e108443c6339497befbda57c06a9adf2`.
+
+The cuBLAS diagnostic therefore does not resolve the known long-context route
+tie and does not change the default backend, strict gates, or promotion status.
+
 Compared directly with the original CPU reference, the native 512-token trace
 has zero expert-set differences and one ordered-ID difference. Final hidden
 states and logits pass the unchanged numeric tolerance, but 29 intermediate
 elements do not. Thus neither reference makes strict native parity pass.
+
+The retained CUDA-cached comparisons make the boundary explicit. The
+135-position case passed all unchanged strict gates (2,565 route rows); its
+comparison result is
+`/work/AI/experiments/ring-cached-20261016-r1/case-128/compare/result.json`
+(SHA-256
+`04c898cd71d3f88a26982b394023281a206a1418f28301d69cdfcd5f4008134b`). The
+519-position case failed first at position 172/layer 7, expected expert 227
+versus native 241; its result is
+`/work/AI/experiments/ring-cached-20261016-r1/case-512/compare/result.json`
+(SHA-256
+`42937b64c71bb85c9310511e319400d030f8cf08dc1478e371de3193e9048f27`). The
+independent 173-position probe observed the same first set flip and failed
+numeric parity; its result is
+`/work/AI/experiments/ring-cached-20261016-r2/probe173/compare/result.json`
+(SHA-256
+`f21f4d6187a54e4e84382eceb3c6ffca652ea794ff5226b8afe70e52990ab9d9`).
+The separate full CPU-versus-CUDA and FP64 input-rounding diagnostics remain
+historical evidence under
+`/work/AI/experiments/ring-generation-20261016-r2`; the retained
+`cpu-native512-diagnostic.json` is SHA-256
+`e245132ca6699ff0b0ae40064d6bdf96d49c931775e56d4d9c6b3a1d5b58f099`. Those
+diagnostics point to upstream pre-router input rounding as the dominant cause
+of the near-tie, rather than a sigmoid formula defect.
 
 ## Cache, cancellation, and repairs
 
@@ -88,7 +142,8 @@ decoder classes; CUDA TF32 is disabled. The checkpoint is never rewritten.
 Use the opt-in path for bounded generation and cache experiments with this
 known numerical limitation. Do not treat the longer traces as an exact
 intervention or gradient oracle, or promote this path to production on this
-evidence. The next discriminator is cached-versus-full reference execution on
-the same long traces and task-level quality validation, not a wider tolerance.
+evidence. The next discriminator is isolation of the pre-router operator
+rounding path (normalization, attention/cache, and projection accumulation),
+not another cached-versus-full rerun or a wider tolerance.
 
 Sev's Mac oMLX runtime was not stopped, restarted, or used for these tests.

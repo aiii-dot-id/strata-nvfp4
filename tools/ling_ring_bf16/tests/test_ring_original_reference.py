@@ -86,7 +86,7 @@ def test_reference_run_reduced_checkpoint_all_and_last(tmp_path):
     }))
     tokens = [1, 2, 3, 4]
     outputs = {}
-    for mode in ("all", "last"):
+    for mode in ("all", "last", "cached"):
         args = SimpleNamespace(
             checkpoint=checkpoint,
             source=checkpoint / "modeling_bailing_moe_v2.py",
@@ -94,23 +94,81 @@ def test_reference_run_reduced_checkpoint_all_and_last(tmp_path):
             output=tmp_path / ("out-" + mode),
             threads=1,
             device="cpu",
-            logits_mode=mode,
+            logits_mode="all" if mode == "cached" else mode,
+            decoding_mode="cached" if mode == "cached" else "full",
+            route_probe="2,1" if mode == "cached" else None,
         )
         outputs[mode] = reference.run(args)
         assert outputs[mode]["source"]["sha256"] == reference.sha(args.source)
         assert outputs[mode]["source_details"]["runner"]["sha256"] == reference.sha(Path(reference.__file__).resolve())
         assert outputs[mode]["checkpoint"]["shards"]["model.safetensors"]["sha256"] == reference.sha(checkpoint / "model.safetensors")
     ids = torch.tensor([tokens], dtype=torch.long)
+    full_gate_inputs = []
+    full_gate = oracle.model.layers[1].mlp.gate
+    full_gate_original = full_gate.forward
+    def capture_full_gate(x, _original=full_gate_original):
+        full_gate_inputs.append(x.detach().clone())
+        return _original(x)
+    full_gate.forward = capture_full_gate
     with torch.no_grad():
         expected = oracle(ids, use_cache=False, return_dict=True).logits.float()
+    full_gate.forward = full_gate_original
     all_logits = torch.frombuffer(bytearray((tmp_path / "out-all" / "logits.fp32").read_bytes()), dtype=torch.float32).reshape(1, 4, 32)
     last_logits = torch.frombuffer(bytearray((tmp_path / "out-last" / "logits.fp32").read_bytes()), dtype=torch.float32).reshape(1, 1, 32)
     assert torch.allclose(all_logits, expected, atol=1e-5, rtol=1e-4)
     assert torch.allclose(last_logits, expected[:, -1:], atol=1e-5, rtol=1e-4)
     assert outputs["all"]["logits_mode"] == "all"
     assert outputs["last"]["logits_mode"] == "last"
+    # Derive the cache oracle independently with the complete original model,
+    # retaining its single shared cache across all layers and token positions.
+    pieces = []
+    cache = None
+    with torch.no_grad():
+        for pos in range(len(tokens)):
+            result = oracle(ids[:, pos:pos + 1], past_key_values=cache, use_cache=True, return_dict=True)
+            cache = result.past_key_values
+            pieces.append(result.logits.float())
+    expected_cached = torch.cat(pieces, dim=1)
+    cached_logits = torch.frombuffer(bytearray((tmp_path / "out-cached" / "logits.fp32").read_bytes()), dtype=torch.float32).reshape(1, 4, 32)
+    assert torch.allclose(cached_logits, expected_cached, atol=1e-5, rtol=1e-4)
+    assert outputs["cached"]["decoding_mode"] == "cached"
+    cached_routes = json.loads((tmp_path / "out-cached" / "layers.json").read_text())
+    assert cached_routes[0]["router_ids"] == []
+    assert len(cached_routes[1]["router_ids"]) == len(tokens)
+    assert len(cached_routes[1]["router_weights"]) == len(tokens)
+    probe = json.loads((tmp_path / "out-cached" / "route-probe.json").read_text())
+    assert probe["position"] == 2 and probe["layer"] == 1
+    assert "recomputed on the original logits device" in probe["score_reconstruction"]
+    assert len(full_gate_inputs) == 1
+    assert torch.allclose(torch.tensor(probe["gate_input"]), full_gate_inputs[0][0, 2], atol=1e-5, rtol=1e-5)
+    assert len(probe["gate_input"]) == 8
+    assert len(probe["router_logits"]) == 4
+    assert len(probe["sigmoid_scores"]) == 4
+    assert len(probe["expert_bias"]) == 4
+    assert len(probe["bias_corrected_scores"]) == 4
+    assert len(probe["selected_expert_ids"]) == 2
+    assert len(probe["selected_weights"]) == 2
     del oracle, module
     gc.collect()
+
+
+def test_cached_decode_rejects_stale_cache():
+    torch = pytest.importorskip("torch")
+    class BrokenCache:
+        def get_seq_length(self, layer): return 0
+    class Layer:
+        def __call__(self, hidden, **kw): return hidden, kw["past_key_value"]
+    hidden = torch.ones(1, 2, 8)
+    pos = torch.tensor([[0, 1]])
+    emb = (torch.ones(1, 2, 4), torch.zeros(1, 2, 4))
+    with pytest.raises(reference.ReferenceError, match="advance exactly once"):
+        reference.decode_layer(Layer(), hidden, pos, emb, None, "cached", BrokenCache, 0, torch)
+
+@pytest.mark.parametrize("probe", ["4,1", "1,0", "1,2", "1", "x,1"])
+def test_route_probe_input_fails_closed(probe):
+    with pytest.raises(reference.ReferenceError):
+        reference._parse_route_probe(probe, 4, 2)
+
 
 def test_original_two_layer_reduced_geometry_prefill_incremental_and_logits_modes():
     torch = pytest.importorskip("torch")

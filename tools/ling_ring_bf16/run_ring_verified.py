@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -211,7 +212,42 @@ def _tokens(text: str) -> list[int]:
     return values
 
 
-def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str, generate: int = 0) -> dict:
+def _parse_route_probe(text: str, token_count: int, generate: int = 0) -> tuple[int, int]:
+    if not isinstance(text, str) or text.count(",") != 1:
+        raise VerificationError("route_probe must be POS,LAYER")
+    pos_text, layer_text = text.split(",")
+    if not pos_text.isdigit() or not layer_text.isdigit():
+        raise VerificationError("route_probe must be POS,LAYER")
+    position, layer = int(pos_text), int(layer_text)
+    if layer < 1 or layer >= 20:
+        raise VerificationError("route_probe layer must be a sparse layer 1..19")
+    maximum = token_count + generate
+    if position < 0 or position >= maximum:
+        raise VerificationError("route_probe position exceeds evaluation window")
+    return position, layer
+
+def _require_route_probe(path: Path, expected: tuple[int, int]) -> dict:
+    value = _read_json(path, "route probe")
+    if value.get("position") != expected[0] or value.get("layer") != expected[1]:
+        raise VerificationError("route probe identity mismatch")
+    lengths = {"gate_input": 2048, "router_logits": 256,
+               "sigmoid_scores": 256, "expert_bias": 256,
+               "bias_corrected_scores": 256, "selected_weights": 8}
+    for name, length in lengths.items():
+        values = value.get(name)
+        if not isinstance(values, list) or len(values) != length:
+            raise VerificationError("route probe geometry mismatch: " + name)
+        if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(float(x)) for x in values):
+            raise VerificationError("route probe contains nonfinite values: " + name)
+    ids = value.get("selected_expert_ids")
+    if (not isinstance(ids, list) or len(ids) != 8 or
+            any(type(x) is not int or x < 0 or x >= 256 for x in ids) or
+            len(set(ids)) != 8):
+        raise VerificationError("route probe expert IDs are invalid")
+    return value
+
+def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
+                       generate: int = 0, matmul: str = "bf16-gemv") -> dict:
     execution = _read_json(path, "execution receipt")
     required = {
         "status": "executed",
@@ -220,6 +256,7 @@ def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str, gen
         "quantized": False,
         "layers": 20,
         "checkpoint_id": checkpoint_id,
+        "matmul_backend": matmul,
     }
     for key, value in required.items():
         if execution.get(key) != value:
@@ -271,7 +308,8 @@ def _require_generation(path: Path, token_ids: list[int], max_new: int, eos_ids:
 
 
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path, cache_mib: int,
-                 generate: int = 0, eos_ids=None, logits_mode: str = "all", binding_files=(), timeout: float = 1800) -> dict:
+                 generate: int = 0, eos_ids=None, logits_mode: str = "all", binding_files=(), timeout: float = 1800,
+                 route_probe: str | None = None, matmul: str = "bf16-gemv") -> dict:
     checkpoint = checkpoint.resolve()
     manifest = manifest.resolve()
     executable = executable.resolve()
@@ -288,6 +326,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("generate must fit within the 4096-token evaluation window")
     if logits_mode not in {"all", "last"}:
         raise VerificationError("logits_mode must be all or last")
+    if matmul not in {"bf16-gemv", "fp32-cublas"}:
+        raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     if generate and logits_mode != "all":
         raise VerificationError("generation requires logits_mode all")
     if not generate:
@@ -302,6 +342,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("EOS IDs are mandatory for generation")
     if generate and not {Path(path).name for path in binding_files} >= {"tokenizer.json", "tokenizer_config.json", "generation_config.json"}:
         raise VerificationError("generation requires tokenizer and generation-config bindings")
+    parsed_probe = _parse_route_probe(route_probe, len(token_ids), generate) if route_probe is not None else None
     _file(executable, "executable")
     if not os.access(executable, os.X_OK):
         raise VerificationError("executable is not executable")
@@ -318,11 +359,14 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
 
     manifest_hash = _sha(manifest)
     before = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
-    argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), manifest_hash]
+    argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), manifest_hash,
+            "--matmul", matmul]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos)), "--logits-mode", logits_mode]
     elif logits_mode != "all":
         argv += ["--logits-mode", logits_mode]
+    if parsed_probe is not None:
+        argv += ["--route-probe", f"{parsed_probe[0]},{parsed_probe[1]}"]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
     if returncode != 0:
         detail = stderr.strip()[-2000:]
@@ -333,11 +377,15 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     after = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate)
+    execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul)
     native = {}
     expected_native = EXPECTED_NATIVE + (("generation.json",) if generate else ())
+    if parsed_probe is not None:
+        expected_native += ("route-probe.json",)
     for name in expected_native:
         path = _file(output / name, f"native output {name}")
+        if parsed_probe is not None and name == "route-probe.json":
+            _require_route_probe(path, parsed_probe)
         native[name] = {"sha256": _sha(path), "size": path.stat().st_size}
 
     receipt = {
@@ -352,6 +400,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         "frontend": before["frontend"],
         "argv": argv,
         "cache_mib": cache_mib,
+        "matmul_backend": matmul,
         "execution": execution,
         "native_outputs": native,
         "scope": {
@@ -359,6 +408,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
             "reference": "this wrapper verifies the native Ring run and does not execute or independently validate the CPU original-reference outputs",
         },
     }
+    if parsed_probe is not None:
+        receipt["route_probe"] = {"position": parsed_probe[0], "layer": parsed_probe[1], "output": "route-probe.json"}
     if generate:
         receipt["generation"] = _require_generation(output / "generation.json", token_ids, generate, parsed_eos)
         expected_evaluated = token_ids + receipt["generation"]["generated_token_ids"][:-1]
@@ -380,13 +431,16 @@ def main() -> int:
     parser.add_argument("--eos", help="comma-separated EOS IDs; required with --generate")
     parser.add_argument("--logits-mode", choices=("all", "last"), default="all")
     parser.add_argument("--timeout", type=float, default=1800)
+    parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
+    parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv",
+                        help="linear backend; fp32-cublas widens cached BF16 weights into temporary FP32 scratch")
     parser.add_argument("--bind-file", action="append", type=Path, default=[],
                         help="checkpoint-local frontend file to hash and bind; repeatable")
     args = parser.parse_args()
     try:
         print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib,
                                      args.generate, args.eos, args.logits_mode, binding_files=args.bind_file,
-                                     timeout=args.timeout), indent=2, sort_keys=True))
+                                     timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

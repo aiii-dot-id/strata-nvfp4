@@ -5,6 +5,7 @@
 #include <cmath>
 #include <csignal>
 #include <cstring>
+#include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +33,10 @@ static void check_cancelled() {
 static void check(cudaError_t e) {
   if (e != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(e));
+}
+static void check_cublas(cublasStatus_t e) {
+  if (e != CUBLAS_STATUS_SUCCESS)
+    throw std::runtime_error("cuBLAS operation failed");
 }
 static float bf16(uint16_t b) {
   uint32_t u = uint32_t(b) << 16;
@@ -108,22 +113,90 @@ struct CudaBackend final : sr::ExpertCache::Backend {
     }
   }
 };
+enum class MatmulBackend { Bf16Gemv, Fp32Cublas };
+
+static const char *matmul_backend_name(MatmulBackend backend) {
+  return backend == MatmulBackend::Fp32Cublas ? "fp32-cublas" : "bf16-gemv";
+}
+
+static MatmulBackend parse_matmul_backend(const std::string &value) {
+  if (value == "bf16-gemv")
+    return MatmulBackend::Bf16Gemv;
+  if (value == "fp32-cublas")
+    return MatmulBackend::Fp32Cublas;
+  throw std::invalid_argument("matmul backend must be bf16-gemv or fp32-cublas");
+}
+
+__global__ static void widen_bf16(const uint16_t *src, float *dst,
+                                  size_t count) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i < count) {
+    const uint32_t bits = uint32_t(src[i]) << 16;
+    dst[i] = __uint_as_float(bits);
+  }
+}
+
 class Matvec {
   // Largest matrix is the unmodified BF16 output head.
+  static constexpr size_t max_weight_bytes = size_t(157184) * 2048 * 2;
   DeviceBuffer weight{size_t(157184) * 2048 * 2}, x{5120 * 4}, y{157184 * 4};
+  MatmulBackend backend_;
+  std::unique_ptr<DeviceBuffer> fp32_weight;
+  cublasHandle_t cublas = nullptr;
 
 public:
-  static constexpr size_t workspace_bytes =
-      size_t(157184) * 2048 * 2 + 5120 * 4 + 157184 * 4;
+  static constexpr size_t fp32_weight_bytes = size_t(157184) * 2048 * 4;
+  static constexpr size_t base_workspace_bytes =
+      max_weight_bytes + 5120 * 4 + 157184 * 4;
+  static constexpr size_t workspace_bytes(MatmulBackend backend) {
+    return base_workspace_bytes +
+           (backend == MatmulBackend::Fp32Cublas ? fp32_weight_bytes : 0);
+  }
+  static constexpr size_t fp32_scratch_bytes(MatmulBackend backend) {
+    return backend == MatmulBackend::Fp32Cublas ? fp32_weight_bytes : 0;
+  }
+
+  explicit Matvec(MatmulBackend backend) : backend_(backend) {
+    if (backend_ == MatmulBackend::Fp32Cublas) {
+      fp32_weight = std::make_unique<DeviceBuffer>(fp32_weight_bytes);
+      check_cublas(cublasCreate(&cublas));
+      // Pedantic mode excludes TF32/reduced-precision tensor-core math. The
+      // one-column GEMM has no atomics in this API and uses the default stream.
+      check_cublas(cublasSetMathMode(cublas, CUBLAS_PEDANTIC_MATH));
+      check_cublas(cublasSetAtomicsMode(cublas, CUBLAS_ATOMICS_NOT_ALLOWED));
+    }
+  }
+  ~Matvec() {
+    if (cublas)
+      cublasDestroy(cublas);
+  }
+
   std::vector<float> apply_device(const uint16_t *w, size_t rows, size_t cols,
                                   const std::vector<float> &input) {
     if (input.size() != cols || cols > 5120 || rows > 157184 || cols % 2)
       throw std::runtime_error("matvec geometry");
     check(cudaMemcpy(x.p, input.data(), cols * 4, cudaMemcpyHostToDevice));
-    strata::kernels::bf16_gemv_fp32_mmvf(static_cast<float *>(x.p), w,
-                                         static_cast<float *>(y.p), cols, rows,
-                                         nullptr);
-    check(cudaGetLastError());
+    if (backend_ == MatmulBackend::Bf16Gemv) {
+      strata::kernels::bf16_gemv_fp32_mmvf(static_cast<float *>(x.p), w,
+                                           static_cast<float *>(y.p), cols, rows,
+                                           nullptr);
+      check(cudaGetLastError());
+    } else {
+      if (!fp32_weight || !cublas)
+        throw std::runtime_error("cuBLAS backend is not initialized");
+      const size_t count = rows * cols;
+      const int blocks = static_cast<int>((count + 255) / 256);
+      widen_bf16<<<blocks, 256>>>(w, static_cast<float *>(fp32_weight->p),
+                                   count);
+      check(cudaGetLastError());
+      const float alpha = 1.0f, beta = 0.0f;
+      check_cublas(cublasSgemm(
+          cublas, CUBLAS_OP_T, CUBLAS_OP_N, static_cast<int>(rows), 1,
+          static_cast<int>(cols), &alpha,
+          static_cast<const float *>(fp32_weight->p), static_cast<int>(cols),
+          static_cast<const float *>(x.p), static_cast<int>(cols), &beta,
+          static_cast<float *>(y.p), static_cast<int>(rows)));
+    }
     std::vector<float> output(rows);
     check(cudaMemcpy(output.data(), y.p, rows * 4, cudaMemcpyDeviceToHost));
     finite(output);
@@ -162,13 +235,89 @@ static void write_row(const std::filesystem::path &p,
   if (!out.write(reinterpret_cast<const char *>(x.data()), x.size() * 4))
     throw std::runtime_error("output write failed");
 }
+struct RouteProbeSpec {
+  size_t position;
+  size_t layer;
+};
+
+static RouteProbeSpec parse_route_probe(const std::string &text) {
+  const size_t comma = text.find(',');
+  if (comma == std::string::npos || comma == 0 || comma + 1 >= text.size() ||
+      text.find(',', comma + 1) != std::string::npos)
+    throw std::invalid_argument("route probe must be POS,LAYER");
+  RouteProbeSpec result{sr::unsigned_decimal(text.substr(0, comma)),
+                        sr::unsigned_decimal(text.substr(comma + 1))};
+  if (result.layer == 0 || result.layer >= 20)
+    throw std::invalid_argument("route probe layer must be a sparse layer 1..19");
+  return result;
+}
+
+static float router_sigmoid(float x) {
+  if (x >= 0.0f) {
+    const float z = std::exp(-x);
+    return 1.0f / (1.0f + z);
+  }
+  const float z = std::exp(x);
+  return z / (1.0f + z);
+}
+
+static void write_float_array(std::ostream &out, const std::vector<float> &x) {
+  out << '[' << std::setprecision(9);
+  for (size_t i = 0; i < x.size(); ++i) {
+    if (i)
+      out << ',';
+    out << x[i];
+  }
+  out << ']';
+}
+
+static void write_route_probe(const std::filesystem::path &path,
+                              const RouteProbeSpec &spec,
+                              const std::vector<float> &gate_input,
+                              const std::vector<float> &router_logits,
+                              const std::vector<float> &sigmoid_scores,
+                              const std::vector<float> &expert_bias,
+                              const std::vector<float> &bias_corrected,
+                              const sr::RoutingResult &selected) {
+  if (gate_input.size() != 2048 || router_logits.size() != 256 ||
+      sigmoid_scores.size() != 256 || expert_bias.size() != 256 ||
+      bias_corrected.size() != 256 || selected.expert_ids.size() != 8 ||
+      selected.weights.size() != 8)
+    throw std::runtime_error("route probe geometry");
+  std::ofstream out(path);
+  if (!out)
+    throw std::runtime_error("route probe output open failed");
+  out << "{\"position\":" << spec.position << ",\"layer\":"
+      << spec.layer << ",\"gate_input\":";
+  write_float_array(out, gate_input);
+  out << ",\"router_logits\":";
+  write_float_array(out, router_logits);
+  out << ",\"sigmoid_scores\":";
+  write_float_array(out, sigmoid_scores);
+  out << ",\"expert_bias\":";
+  write_float_array(out, expert_bias);
+  out << ",\"bias_corrected_scores\":";
+  write_float_array(out, bias_corrected);
+  out << ",\"selected_expert_ids\":[";
+  for (size_t i = 0; i < selected.expert_ids.size(); ++i) {
+    if (i)
+      out << ',';
+    out << selected.expert_ids[i];
+  }
+  out << "],\"selected_weights\":";
+  write_float_array(out, selected.weights);
+  out << "}\n";
+  if (!out)
+    throw std::runtime_error("route probe output write failed");
+}
 int main(int argc, char **argv) {
   try {
     if (argc < 7 || (argc - 7) % 2)
       throw std::runtime_error(
           "usage: strata_ring_bf16 ROOT MANIFEST "
           "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
-          "[--generate N --eos CSV] [--logits-mode all|last]");
+          "[--generate N --eos CSV] [--logits-mode all|last] "
+          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
       throw std::runtime_error("refusing existing output directory");
@@ -183,6 +332,9 @@ int main(int argc, char **argv) {
     size_t generate = 0;
     std::vector<int> eos;
     std::string logits_mode = "all";
+    MatmulBackend matmul_backend = MatmulBackend::Bf16Gemv;
+    bool has_route_probe = false;
+    RouteProbeSpec route_probe{};
     std::vector<std::string> options;
     for (int i = 7; i < argc; i += 2) {
       const std::string option = argv[i];
@@ -195,7 +347,12 @@ int main(int argc, char **argv) {
         eos = sr::vocabulary_ids(argv[i + 1], 157184);
       else if (option == "--logits-mode")
         logits_mode = argv[i + 1];
-      else
+      else if (option == "--matmul")
+        matmul_backend = parse_matmul_backend(argv[i + 1]);
+      else if (option == "--route-probe") {
+        route_probe = parse_route_probe(argv[i + 1]);
+        has_route_probe = true;
+      } else
         throw std::invalid_argument("unknown option");
     }
     if (logits_mode != "all" && logits_mode != "last")
@@ -206,6 +363,8 @@ int main(int argc, char **argv) {
     sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3], 157184),
                                     generate, eos);
     const auto &tokens = generation.evaluated();
+    if (has_route_probe && route_probe.position >= generation.kv_capacity())
+      throw std::invalid_argument("route probe position exceeds evaluation window");
     std::signal(SIGINT, cancel_handler);
     std::signal(SIGTERM, cancel_handler);
     sr::TensorStore store(argv[1], argv[2]);
@@ -221,10 +380,11 @@ int main(int argc, char **argv) {
     size_t free = 0, total = 0;
     check(cudaMemGetInfo(&free, &total));
     const size_t budget = cache_mib * 1024 * 1024;
-    if (free < budget + Matvec::workspace_bytes + size_t(512) * 1024 * 1024)
+    if (free < budget + Matvec::workspace_bytes(matmul_backend) +
+                    size_t(512) * 1024 * 1024)
       throw std::runtime_error(
           "insufficient free GPU memory; no process will be stopped");
-    Matvec mv;
+    Matvec mv(matmul_backend);
     auto backend = std::make_shared<CudaBackend>();
     sr::ExpertCache cache({budget, 20, 256}, backend);
     sr::ExpertCache::Provider provider = [&](const sr::ExpertKey &key,
@@ -263,6 +423,10 @@ int main(int argc, char **argv) {
     std::ofstream routes(output / "routes.tsv");
     routes << std::setprecision(9);
     const auto start = std::chrono::steady_clock::now();
+    bool route_probe_found = false;
+    std::vector<float> probe_gate_input, probe_router_logits, probe_sigmoid,
+        probe_bias, probe_corrected;
+    sr::RoutingResult probe_selected;
     for (size_t pos = 0; pos < tokens.size(); ++pos) {
       check_cancelled();
       std::vector<float> h(2048);
@@ -301,6 +465,20 @@ int main(int argc, char **argv) {
           if (logits.size() != 256 || bias.size() != 256)
             throw std::runtime_error("router geometry");
           auto selected = sr::route(logits.data(), bias.data(), 256, routing);
+          if (has_route_probe && route_probe.position == pos &&
+              route_probe.layer == static_cast<size_t>(layer)) {
+            route_probe_found = true;
+            probe_gate_input = x;
+            probe_router_logits = logits;
+            probe_bias = bias;
+            probe_sigmoid.resize(logits.size());
+            probe_corrected.resize(logits.size());
+            for (size_t i = 0; i < logits.size(); ++i) {
+              probe_sigmoid[i] = router_sigmoid(logits[i]);
+              probe_corrected[i] = probe_sigmoid[i] + bias[i];
+            }
+            probe_selected = selected;
+          }
           std::vector<float> mixed(2048, 0);
           routes << pos << '\t' << layer;
           for (size_t j = 0; j < 8; ++j) {
@@ -343,6 +521,13 @@ int main(int argc, char **argv) {
         std::cerr << "prefill " << pos << '\n';
     }
     check_cancelled();
+    if (has_route_probe) {
+      if (!route_probe_found)
+        throw std::runtime_error("route probe position was not evaluated");
+      write_route_probe(output / "route-probe.json", route_probe,
+                        probe_gate_input, probe_router_logits, probe_sigmoid,
+                        probe_bias, probe_corrected, probe_selected);
+    }
     if (generate) {
       std::ofstream generated(output / "generation.json");
       generated << generation.receipt();
@@ -383,7 +568,12 @@ int main(int argc, char **argv) {
             << ",\"cache_hits\":" << stats.hits
             << ",\"cache_misses\":" << stats.misses
             << ",\"cache_evictions\":" << stats.evictions
-            << ",\"workspace_bytes\":" << Matvec::workspace_bytes
+            << ",\"matmul_backend\":\""
+            << matmul_backend_name(matmul_backend)
+            << "\",\"matmul_fp32_weight_scratch_bytes\":"
+            << Matvec::fp32_scratch_bytes(matmul_backend)
+            << ",\"workspace_bytes\":"
+            << Matvec::workspace_bytes(matmul_backend)
             << ",\"wall_seconds\":"
             << std::chrono::duration<double>(std::chrono::steady_clock::now() -
                                              start)

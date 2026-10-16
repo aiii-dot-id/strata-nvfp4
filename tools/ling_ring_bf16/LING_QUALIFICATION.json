@@ -12,13 +12,13 @@
   },
   "author": "AI Identity Incorported <james@aiii.id>",
   "boundaries": [
-    "four-token partial forward plus bounded 64-token GPU boundary evidence",
-    "65-token standard original-reference strict comparison failed; forced-recurrent diagnostic passed its numerical checks but does not qualify the default path",
-    "no generation or tokenizer qualification",
-    "no answer-quality, throughput, serving, or production claim",
+    "bounded initial forward, actual original cached 65-token comparison, and five generation cases; not a full context qualification",
+    "historical batched/chunk 65-token comparison remains failed; current tokenwise DynamicCache comparison passed without mode override",
+    "no broad answer-quality, throughput, serving, or production claim",
     "CPU KDA/MLA tests are separate from actual GPU original-reference equivalence",
     "no Mac GPU qualification",
-    "CUDA TF32 flags were disabled, but this does not establish Triton/FLA chunk-kernel precision; installed FLA chunk_intra.py contains explicit TF32 solve constants"
+    "CUDA TF32 flags were disabled, but this does not establish Triton/FLA chunk-kernel precision; installed FLA chunk_intra.py contains explicit TF32 solve constants",
+    "five frozen tokenizer/template generation cases completed; four strict recompares passed and thinking-on retains one ordered-route failure"
   ],
   "boundary_validation": {
     "cache_replay": "initial 4-token native trace replay passed bitwise at the recorded 5 MiB and 1024 MiB budgets",
@@ -90,7 +90,8 @@
       "status": "diagnostic-only"
     },
     "remaining": "The forced-recurrent diagnostic completed as diagnostic-only; the standard 65-token default-path strict comparison remains failed.",
-    "status": "bounded-evidence-only"
+    "status": "bounded-evidence-only",
+    "protocol": "historical batched prefill and separately labelled forced-recurrent diagnostic"
   },
   "cache_replay": {
     "bitwise_files": 27,
@@ -639,5 +640,90 @@
     },
     "unchanged": true
   },
-  "status": "partial_bounded_gpu_evidence"
+  "status": "partial_bounded_gpu_evidence",
+  "generation_validation": {
+    "status": "bounded_cases_4_strict_pass_1_order_only_failure",
+    "directory": "/work/AI/experiments/ling-cached-generation-20261016-r1",
+    "eos_id": 156895,
+    "native_executable": {
+      "path": "/work/AI/experiments/ling-cached-generation-20261016-r1/build/strata_ling_bf16",
+      "sha256": "af5ffc056e93cf4394b455ac42d5cb7b8ad544d7d2e5372e47e2bb1124d43c46"
+    },
+    "ling_engine_sha256": "2dc8f2208de094704a41e8826a3f02a3da03cfc4d8e965558e5f5d80f70eaf40",
+    "cases": [
+      {
+        "name": "arithmetic-off-17-plus-25",
+        "status": "passed",
+        "answer_check": "exact 42, EOS",
+        "result": "/work/AI/experiments/ling-cached-generation-20261016-r1/arithmetic-off-17-plus-25/RESULT.json"
+      },
+      {
+        "name": "json-off-sum-language",
+        "status": "passed",
+        "answer_check": "exact requested JSON object, EOS",
+        "result": "/work/AI/experiments/ling-cached-generation-20261016-r1/json-off-sum-language/RESULT.json"
+      },
+      {
+        "name": "thinking-on-19-times-23",
+        "status": "strict_parity_failed_answer_passed",
+        "answer_check": "independent decoded diagnostic exact 437, EOS; not a controller gate",
+        "strict_issue": "one ordered expert swap at token 337 layer 19; expert set equal",
+        "result": "/work/AI/experiments/ling-cached-generation-20261016-r1/thinking-on-19-times-23/RESULT.json"
+      },
+      {
+        "name": "long-context-512-off",
+        "status": "passed",
+        "prompt_tokens": 511,
+        "evaluated_tokens": 521,
+        "generated_tokens": 11,
+        "route_count": 11983,
+        "route_mismatch_count": 0,
+        "top1_exact": true,
+        "answer_check": "exact 42, EOS",
+        "result": "/work/AI/experiments/ling-cached-generation-20261016-r1/long-context-512-off/RESULT.json"
+      },
+      {
+        "name": "length-one-off-17-plus-25",
+        "status": "passed",
+        "result": "/work/AI/experiments/ling-cached-generation-20261016-r1/recompare-r3/length-one-off-17-plus-25/result.json",
+        "answer_check": "length-control receipt passed"
+      }
+    ],
+    "recompare_receipt": {
+      "path": "/work/AI/experiments/ling-cached-generation-20261016-r1/recompare-r3/receipt.json",
+      "sha256": "f94b29c09acfcccf7a4c2f88d3ff03083bc99047da518e4bec290b27bb31f06ce",
+      "comparator_sha256": "1bf606377002120e85ca79bdb4ba63e95fb448424c95ef530a47e265c3fab811",
+      "tests": "151 passed, no skips"
+    }
+  },
+  "cached_validation": {
+    "protocol": "unmodified original tokenwise DynamicCache, layer-major, no KDA mode override",
+    "comparison": {
+      "issues": [],
+      "layers": 24,
+      "max_errors": {
+        "final_hidden_max_abs": 7.343292236328125e-05,
+        "hidden_layers_max_abs": 0.000377655029296875,
+        "logits_max_abs": 2.9087066650390625e-05,
+        "route_weight_max_abs": 1.6688276978094052e-06
+      },
+      "model": "Ling-3.0-tiny",
+      "passed": true,
+      "route_count": 1495,
+      "route_mismatch_count": 0,
+      "schema": "ling-reference-compare-v1",
+      "tokens": 65,
+      "tolerances": {
+        "output": "0.001 + 0.001 * abs(reference)",
+        "weights": "1e-5 + 1e-4 * abs(reference)"
+      },
+      "top1_exact": true,
+      "vocab": 157184
+    },
+    "comparison_path": "/work/AI/experiments/ling-cached-generation-20261016-r1/forward65/compare/result.json",
+    "comparison_sha256": "1074aa482ea4996b753f5e9cf8baa6ec79219fe94a63bbcd9a9ef836211ecc1c",
+    "controller_path": "/work/AI/experiments/ling-cached-generation-20261016-r1/forward65/RESULT.json",
+    "controller_sha256": "e5c62682851c7e7ce2b9d6294a217615e077a4178040394fd14a6454e97270fd",
+    "scope": "bounded trace only; does not qualify original batched/chunk prefill"
+  }
 }

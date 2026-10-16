@@ -11,6 +11,35 @@ import pytest
 import run_ling_verified as v
 
 
+def test_ling_source_closure_matches_linked_ring_units(tmp_path):
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    for name in ("modeling_bailing_moe_v3.py", "configuration_bailing_moe_v3.py"):
+        (checkpoint / name).write_text(name)
+    repo = tmp_path / "repo"
+    required = [
+        "include/strata/ling/mla.hpp", "include/strata/ring/generation.hpp",
+        "src/ling/engine.cu", "src/ling/kda.cpp",
+        "src/ring/routing.cpp", "src/ring/expert_cache.cpp", "src/ring/tensor_store.cpp",
+        "include/strata/kernels/bf16_gemv.hpp", "include/strata/kernels/bf16_bits.hpp",
+        "include/strata/kernels/pdl.hpp", "src/kernels/cuda/native_bf16.cu",
+        "src/kernels/cuda/s26_tsum.cuh", "tools/ling_ring_bf16/prepare_ling_manifest.py",
+        "tools/ling_ring_bf16/ling/CMakeLists.txt", "tools/ling_ring_bf16/run_ling_verified.py",
+        "tools/ling_ring_bf16/generate_ling.py",
+    ]
+    for name in required:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name)
+    unrelated = repo / "src/ring/engine.cu"
+    unrelated.write_text("unrelated")
+    _, sources = v._source_files(checkpoint, repo)
+    assert "src/ring/routing.cpp" in sources
+    assert "src/ring/expert_cache.cpp" in sources
+    assert "src/ring/tensor_store.cpp" in sources
+    assert "src/ring/engine.cu" not in sources
+
+
 def fixture(tmp_path, monkeypatch, variant="good"):
     ck = tmp_path / "checkpoint"; ck.mkdir()
     shards = [f"model-{i:05d}-of-00032.safetensors" for i in range(1, 33)]

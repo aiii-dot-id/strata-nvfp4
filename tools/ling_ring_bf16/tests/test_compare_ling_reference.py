@@ -93,3 +93,70 @@ def test_wrong_reference_identity_and_missing_hash_fail(tmp_path):
     report = json.loads((ref / "report.json").read_text()); del report["outputs"]["logits.fp32"]; (ref / "report.json").write_text(json.dumps(report))
     with pytest.raises(c.ComparisonError, match="incomplete"):
         c.compare(ref, cand, tmp_path / "bad2")
+
+
+def add_generation(cand, token=0):
+    value = {"schema": "strata-ling-generation-v1", "prompt_token_ids": [1],
+             "generated_token_ids": [token], "max_new_tokens": 1,
+             "eos_token_ids": [token], "finish_reason": "eos"}
+    (cand / "generation.json").write_text(json.dumps(value))
+    reference = cand.parent / "ref" / "report.json"
+    report = json.loads(reference.read_text())
+    report.update({"decoding_mode": "cached", "logits_mode": "all", "logits_tokens": 1,
+                   "cache_metadata": {"cache_type": "DynamicCache", "prefill_tokens": 0,
+                                      "decode_tokens": 1, "tokenwise": True, "layer_major": True}})
+    reference.write_text(json.dumps(report))
+    prov = json.loads((cand / "provenance.json").read_text())
+    prov["generation"] = value
+    prov["frontend"] = {name: {"sha256": "9" * 64, "size": 1} for name in ("tokenizer.json", "tokenizer_config.json", "generation_config.json")}
+    prov["native_outputs"]["generation.json"] = _meta(cand / "generation.json")
+    (cand / "provenance.json").write_text(json.dumps(prov))
+
+
+def test_generated_answer_requires_original_greedy_choice(tmp_path):
+    ref, cand = fixture(tmp_path)
+    add_generation(cand)
+    result = c.compare(ref, cand, tmp_path / "good")
+    assert result["generation"] == {"greedy_choices_exact": True, "prompt_tokens": 1, "generated_tokens": 1, "finish_reason": "eos"}
+    ref, cand = fixture(tmp_path / "wrong")
+    add_generation(cand, token=2)
+    with pytest.raises(c.ComparisonError, match="original greedy"):
+        c.compare(ref, cand, tmp_path / "wrong-choice")
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda report: report.pop("decoding_mode"), "cached original reference"),
+    (lambda report: report.update({"decoding_mode": "full"}), "cached original reference"),
+    (lambda report: report.pop("cache_metadata"), "cache metadata is missing"),
+    (lambda report: report["cache_metadata"].update({"tokenwise": False}), "cache metadata mismatch"),
+    (lambda report: report.update({"logits_mode": "last"}), "all logits rows"),
+    (lambda report: report.update({"logits_tokens": 0}), "all logits rows"),
+])
+def test_generation_requires_cached_reference_receipt(tmp_path, change, message):
+    ref, cand = fixture(tmp_path)
+    add_generation(cand)
+    report_path = ref / "report.json"
+    report = json.loads(report_path.read_text())
+    change(report)
+    report_path.write_text(json.dumps(report))
+    with pytest.raises(c.ComparisonError, match=message):
+        c.compare(ref, cand, tmp_path / "bad")
+
+
+def test_generation_receipt_cannot_be_changed_or_removed(tmp_path):
+    ref, cand = fixture(tmp_path)
+    add_generation(cand)
+    (cand / "generation.json").write_text((cand / "generation.json").read_text() + " ")
+    with pytest.raises(c.ComparisonError, match="hash mismatch"):
+        c.compare(ref, cand, tmp_path / "changed")
+    (cand / "generation.json").unlink()
+    with pytest.raises(c.ComparisonError, match="provenance disagree"):
+        c.compare(ref, cand, tmp_path / "removed")
+
+
+def test_duplicate_receipt_keys_fail(tmp_path):
+    ref, cand = fixture(tmp_path)
+    report = ref / "report.json"
+    report.write_text(report.read_text().replace('"status": "executed"', '"status": "rejected", "status": "executed"', 1))
+    with pytest.raises(c.ComparisonError, match="duplicate JSON key"):
+        c.compare(ref, cand, tmp_path / "duplicate")

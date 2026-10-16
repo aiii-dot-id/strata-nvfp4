@@ -34,6 +34,33 @@ def make(tmp, corrupt=None):
 def test_pass(tmp_path):
     r,c=make(tmp_path); assert compare(r,c,tmp_path/"out")["passed"]
 
+def test_route_failure_keeps_numeric_diagnostics(tmp_path):
+    r,c=make(tmp_path)
+    p=c/"routes.tsv"
+    p.write_text(p.read_text().replace("0:0.1", "255:0.1", 1))
+    prov=json.loads((c/"provenance.json").read_text())
+    prov["native_outputs"]["routes.tsv"]={"sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"size":p.stat().st_size}
+    (c/"provenance.json").write_text(json.dumps(prov))
+    with pytest.raises(ValueError,match="comparison failed"):
+        compare(r,c,tmp_path/"bad-route")
+    result=json.loads((tmp_path/"bad-route/result.json").read_text())
+    assert result["route_mismatch_count"]==1
+    assert result["route_set_mismatch_count"]==1
+    assert result["top1_exact"] is True
+    assert result["max_errors"]["logits_max_abs"]==0
+
+def test_optional_route_probe_is_bound(tmp_path):
+    r,c=make(tmp_path)
+    (c/"route-probe.json").write_text("{}")
+    prov=json.loads((c/"provenance.json").read_text())
+    probe=c/"route-probe.json"
+    prov["native_outputs"]["route-probe.json"]={"sha256":hashlib.sha256(probe.read_bytes()).hexdigest(),"size":probe.stat().st_size}
+    (c/"provenance.json").write_text(json.dumps(prov))
+    assert compare(r,c,tmp_path/"out")["passed"]
+    probe.write_text("changed")
+    with pytest.raises(ValueError,match="route-probe"):
+        compare(r,c,tmp_path/"changed")
+
 def test_reference_three_dimensional_logits_shape(tmp_path):
     r,c=make(tmp_path)
     report=json.loads((r/"report.json").read_text()); report["logits_shape"]=[1,3,7]; (r/"report.json").write_text(json.dumps(report))

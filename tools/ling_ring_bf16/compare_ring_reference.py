@@ -18,6 +18,7 @@ def verify_hashes(root, report):
     outputs=report.get("outputs")
     expected={"final_hidden.fp32", "logits.fp32", "hidden_layers.fp32", "layers.json", "router_meta.json"}
     if (root/"generation.json").is_file(): expected.add("generation.json")
+    if (root/"route-probe.json").is_file(): expected.add("route-probe.json")
     if not isinstance(outputs, dict): fail("reference output hashes are missing")
     for name in expected:
         meta=outputs.get(name)
@@ -131,6 +132,7 @@ def verify_provenance(cand, execution, layers, tokens, ref_report):
     native=provenance.get("native_outputs")
     expected_native=NATIVE_OUTPUTS | {f"layer-{i}.f32" for i in range(layers)}
     if (cand/"generation.json").is_file(): expected_native.add("generation.json")
+    if (cand/"route-probe.json").is_file(): expected_native.add("route-probe.json")
     if not isinstance(native,dict) or set(native) != expected_native: fail("candidate native output hashes are incomplete")
     for name in expected_native:
         meta=native.get(name)
@@ -228,14 +230,20 @@ def compare(reference,candidate,output):
     rr=routes_ref(ref/"layers.json",layers,tokens,first_dense); cr=routes_candidate(cand/"routes.tsv",layers,tokens,first_dense)
     def maxerr(a,b): return float(np.max(np.abs(a-b)))
     errors={"hidden_layers_max_abs":maxerr(ref_layers,cand_layers),"final_hidden_max_abs":maxerr(ref_final,cand_final),"logits_max_abs":maxerr(ref_logits,cand_logits),"route_weight_max_abs":0.0}
+    route_mismatches=[]; route_set_mismatches=[]
     for key,(ri,rw) in rr.items():
         ci,cw=cr[key]
-        if ci!=ri: fail(f"expert route mismatch at position/layer {key}: expected {ri}, got {ci}")
+        if ci!=ri: route_mismatches.append(key)
+        if set(ci)!=set(ri): route_set_mismatches.append(key)
         errors["route_weight_max_abs"]=max(errors["route_weight_max_abs"],max(abs(float(a)-float(b)) for a,b in zip(rw,cw)))
     top_exact=bool(np.array_equal(np.argmax(ref_logits,axis=1),np.argmax(cand_logits,axis=1)))
     weight_pass=all(abs(float(a)-float(b)) <= WATOL+WRTOL*abs(float(a)) for key,(ri,rw) in rr.items() for a,b in zip(rw,cr[key][1]))
-    passed=bool(np.all(np.abs(ref_layers-cand_layers)<=ATOL+RTOL*np.abs(ref_layers)) and np.all(np.abs(ref_final-cand_final)<=ATOL+RTOL*np.abs(ref_final)) and np.all(np.abs(ref_logits-cand_logits)<=ATOL+RTOL*np.abs(ref_logits)) and weight_pass and top_exact)
+    passed=bool(not route_mismatches and np.all(np.abs(ref_layers-cand_layers)<=ATOL+RTOL*np.abs(ref_layers)) and np.all(np.abs(ref_final-cand_final)<=ATOL+RTOL*np.abs(ref_final)) and np.all(np.abs(ref_logits-cand_logits)<=ATOL+RTOL*np.abs(ref_logits)) and weight_pass and top_exact)
     result={"schema":"ring-reference-compare-v1","passed":passed,"layers":layers,"tokens":tokens,"vocab":vocab,"logits_tokens":ref_logit_tokens,"route_count":len(rr),"top1_exact":top_exact,"max_errors":errors,"tolerances":{"output":"0.001 + 0.001 * abs(reference)","weights":"1e-5 + 1e-4 * abs(reference)"}}
+    result["reference_decoding_mode"]=report.get("decoding_mode", "full")
+    result["route_mismatch_count"]=len(route_mismatches)
+    result["route_set_mismatch_count"]=len(route_set_mismatches)
+    result["first_route_mismatches"]=[{"position":key[0],"layer":key[1],"reference":rr[key][0],"candidate":cr[key][0]} for key in route_mismatches[:8]]
     output.mkdir(parents=True); (output/"result.json").write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
     if not passed: fail("comparison failed")
     return result

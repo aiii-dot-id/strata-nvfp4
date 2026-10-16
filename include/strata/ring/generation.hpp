@@ -95,10 +95,12 @@ public:
       evaluated_.push_back(token);
     return token;
   }
-  std::string receipt() const {
+  std::string receipt(const std::string &schema = "strata-ring-generation-v1") const {
     if (!limit_ || reason_.empty())
       throw std::logic_error("generation not complete");
-    return "{\"schema\":\"strata-ring-generation-v1\",\"prompt_token_ids\":" +
+    if (schema != "strata-ring-generation-v1" && schema != "strata-ling-generation-v1")
+      throw std::invalid_argument("unsupported generation receipt schema");
+    return "{\"schema\":\"" + schema + "\",\"prompt_token_ids\":" +
            json_ids(prompt_) +
            ",\"generated_token_ids\":" + json_ids(generated_) +
            ",\"eos_token_ids\":" + json_ids(eos_) +

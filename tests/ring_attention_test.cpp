@@ -238,6 +238,30 @@ int main() {
         "first token cannot see future");
   check(tiny.length() == 2, "causal prefill commits both positions");
 
+  // A native prefill and its one-token cache replay must agree; this isolates
+  // cache staging/causal indexing from the original Torch batched arithmetic.
+  strata::ring::KvCache batched_cache(8, 2, 4), replay_cache(8, 2, 4);
+  std::vector<float> batched(q.size()), replay(q.size());
+  check(strata::ring::attention_forward(c, q.data(), k.data(), v.data(), nt, 0,
+                                        qw, kw, batched_cache, batched.data(), err),
+        "batched cache replay setup");
+  bool replay_ok = true;
+  for (int64_t t = 0; t < nt; ++t) {
+    std::vector<float> one_out(16);
+    replay_ok &= strata::ring::attention_forward(
+        c, q.data() + size_t(t) * 16, k.data() + size_t(t) * 8,
+        v.data() + size_t(t) * 8, 1, t, qw, kw, replay_cache, one_out.data(),
+        err);
+    std::copy(one_out.begin(), one_out.end(), replay.begin() + size_t(t) * 16);
+  }
+  check(replay_ok, "one-token cache replay succeeds");
+  bool replay_same = replay_ok;
+  for (size_t i = 0; i < replay.size(); ++i)
+    replay_same &= near(replay[i], batched[i]);
+  check(replay_same, "batched and one-token cache attention agree");
+  check(batched_cache.length() == nt && replay_cache.length() == nt,
+        "batched and one-token cache lengths agree");
+
   strata::ring::KvCache partial(2, 1, 4);
   const float pk[] = {4, 3, 2, 1}, pv[] = {1, 2, 3, 4}, pq[] = {1, 2, 3, 4};
   float po[4] = {};

@@ -34,15 +34,22 @@ def fake_engine(monkeypatch, mutate=None):
     def launch(argv, **kwargs):
         output = Path(argv[4])
         output.mkdir()
+        matmul = argv[argv.index("--matmul") + 1]
         (output / "routes.tsv").write_text("\n".join(f"0\t{layer}\t" + "\t".join(f"{x}:0.1" for x in range(8)) for layer in range(1, 20)) + "\n")
         for layer in range(20):
             (output / f"layer-{layer}.f32").write_bytes(b"\0\0\0\0")
         (output / "final-hidden.f32").write_bytes(b"\0\0\0\0")
         (output / "logits.f32").write_bytes(b"\0\0\0\0")
+        if "--route-probe" in argv:
+            (output / "route-probe.json").write_text(json.dumps({
+                "position": 0, "layer": 1, "gate_input": [0.0] * 2048,
+                "router_logits": [0.0] * 256, "sigmoid_scores": [0.5] * 256,
+                "expert_bias": [0.0] * 256, "bias_corrected_scores": [0.5] * 256,
+                "selected_expert_ids": list(range(8)), "selected_weights": [0.125] * 8}))
         (output / "execution.json").write_text(json.dumps({
             "status": "executed", "model": "Ring-mini-2.0", "activation_dtype": "FP32",
             "quantized": False, "tokens": 1, "token_ids": [1], "layers": 20,
-            "checkpoint_id": argv[6],
+            "checkpoint_id": argv[6], "matmul_backend": matmul,
         }))
         if mutate:
             mutate(Path(argv[1]))
@@ -79,6 +86,42 @@ def test_verified_receipt_binds_manifest_and_outputs(tmp_path, monkeypatch):
     assert set(receipt["native_outputs"]) == set(verified.EXPECTED_NATIVE)
 
 
+def test_route_probe_is_forwarded_and_bound(tmp_path, monkeypatch):
+    root, manifest = checkpoint(tmp_path)
+    fake_engine(monkeypatch)
+    receipt = verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
+                                   route_probe="0,1")
+    assert receipt["route_probe"] == {"position": 0, "layer": 1, "output": "route-probe.json"}
+    assert "route-probe.json" in receipt["native_outputs"]
+
+
+def test_fp32_cublas_backend_is_forwarded_and_bound(tmp_path, monkeypatch):
+    root, manifest = checkpoint(tmp_path)
+    fake_engine(monkeypatch)
+    receipt = verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
+                                    matmul="fp32-cublas")
+    assert receipt["matmul_backend"] == "fp32-cublas"
+    assert receipt["execution"]["matmul_backend"] == "fp32-cublas"
+    assert receipt["argv"][-2:] == ["--matmul", "fp32-cublas"]
+
+
+@pytest.mark.parametrize("backend", ["", "cuda", "fp32-cublas "])
+def test_invalid_matmul_backend_refused(tmp_path, backend):
+    root, manifest = checkpoint(tmp_path)
+    with pytest.raises(verified.VerificationError, match="matmul"):
+        verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
+                              matmul=backend)
+
+
+@pytest.mark.parametrize("probe,match", [("0,0", "sparse layer"), ("1,20", "sparse layer"),
+                                          ("1", "POS,LAYER"), ("2,1", "evaluation window")])
+def test_route_probe_invalid_input_refused(tmp_path, probe, match):
+    root, manifest = checkpoint(tmp_path)
+    with pytest.raises(verified.VerificationError, match=match):
+        verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
+                              route_probe=probe)
+
+
 def test_cli_repeated_bind_file_is_recorded(tmp_path):
     root, manifest = checkpoint(tmp_path)
     first = root / "tokenizer.json"; second = root / "tokenizer_config.json"
@@ -91,7 +134,7 @@ o = pathlib.Path(sys.argv[4]); o.mkdir()
 (o / \"routes.tsv\").write_text(\"\".join(f\"0\\t{layer}\\t\" + \"\\t\".join(f\"{x}:0.1\" for x in range(8)) + \"\\n\" for layer in range(1, 20)))
 for layer in range(20): (o / f\"layer-{layer}.f32\").write_bytes(bytes(4))
 (o / \"final-hidden.f32\").write_bytes(bytes(4)); (o / \"logits.f32\").write_bytes(bytes(4))
-(o / \"execution.json\").write_text(json.dumps({\"status\":\"executed\",\"model\":\"Ring-mini-2.0\",\"activation_dtype\":\"FP32\",\"quantized\":False,\"tokens\":1,\"token_ids\":[1],\"layers\":20,\"checkpoint_id\":sys.argv[6]}))
+(o / \"execution.json\").write_text(json.dumps({\"status\":\"executed\",\"model\":\"Ring-mini-2.0\",\"activation_dtype\":\"FP32\",\"quantized\":False,\"tokens\":1,\"token_ids\":[1],\"layers\":20,\"checkpoint_id\":sys.argv[6],\"matmul_backend\":sys.argv[sys.argv.index(\"--matmul\")+1]}))
 """)
     executable.chmod(0o755)
     output = tmp_path / "out"
@@ -114,7 +157,7 @@ def test_verified_generation_requires_eos_and_binds_trace(tmp_path, monkeypatch)
         (output / "routes.tsv").write_text("\n".join(f"0\t{layer}\t" + "\t".join(f"{x}:0.1" for x in range(8)) for layer in range(1,20)) + "\n")
         for layer in range(20): (output / f"layer-{layer}.f32").write_bytes(b"\0\0\0\0")
         (output / "final-hidden.f32").write_bytes(b"\0\0\0\0"); (output / "logits.f32").write_bytes(b"\0\0\0\0")
-        (output / "execution.json").write_text(json.dumps({"status":"executed","model":"Ring-mini-2.0","activation_dtype":"FP32","quantized":False,"tokens":2,"token_ids":[1,3],"layers":20,"checkpoint_id":argv[6],"logits_mode":"all","logits_tokens":2}))
+        (output / "execution.json").write_text(json.dumps({"status":"executed","model":"Ring-mini-2.0","activation_dtype":"FP32","quantized":False,"tokens":2,"token_ids":[1,3],"layers":20,"checkpoint_id":argv[6],"matmul_backend":argv[argv.index("--matmul")+1],"logits_mode":"all","logits_tokens":2}))
         (output / "generation.json").write_text(json.dumps({"prompt_token_ids":[1],"generated_token_ids":[3,9],"eos_token_ids":[9],"max_new_tokens":2,"finish_reason":"eos"}))
         class Finished:
             pid = os.getpid()

@@ -38,9 +38,18 @@ def fail(message: str):
     raise ComparisonError(message)
 
 
+def _unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            fail("duplicate JSON key: " + key)
+        result[key] = value
+    return result
+
+
 def _json(path: Path, label: str):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         fail(f"invalid {label}: {exc}")
 
@@ -184,16 +193,85 @@ def verify_provenance(candidate: Path, execution: dict, token_ids: list[int], re
     config_meta = original.get("configuration_bailing_moe_v3.py")
     if _pin(config_meta, "candidate configuration source") != reference_configuration:
         fail("candidate original configuration source does not match reference")
+    generated = (candidate / "generation.json").is_file()
+    if generated != ("generation" in provenance):
+        fail("generation receipt and provenance disagree")
+    if generated:
+        frontend = provenance.get("frontend")
+        if not isinstance(frontend, dict):
+            fail("generation frontend bindings are missing")
+        for name in ("tokenizer.json", "tokenizer_config.json", "generation_config.json"):
+            _pin(frontend.get(name), "generation frontend " + name)
+        if provenance["generation"] != _json(candidate / "generation.json", "generation receipt"):
+            fail("generation receipt differs from provenance")
     native = provenance.get("native_outputs")
-    if not isinstance(native, dict) or set(native) != NATIVE_OUTPUTS:
+    expected_native = NATIVE_OUTPUTS | ({"generation.json"} if generated else set())
+    if not isinstance(native, dict) or set(native) != expected_native:
         fail("candidate native output hashes are incomplete")
-    for name in NATIVE_OUTPUTS:
+    for name in expected_native:
         meta = native.get(name)
         path = candidate / name
         if not path.is_file():
             fail(f"candidate output is missing: {name}")
         if not isinstance(meta, dict) or _pin(meta, f"candidate output {name}") != _hash(path) or meta["size"] != path.stat().st_size:
             fail(f"candidate output hash mismatch: {name}")
+
+
+def verify_generation(candidate: Path, token_ids: list[int], ref_logits: np.ndarray) -> dict | None:
+    path = candidate / "generation.json"
+    if not path.is_file():
+        return None
+    value = _json(path, "generation receipt")
+    if value.get("schema") != "strata-ling-generation-v1":
+        fail("invalid Ling generation schema")
+    prompt, generated = value.get("prompt_token_ids"), value.get("generated_token_ids")
+    for name, ids in (("prompt", prompt), ("generated", generated)):
+        if not isinstance(ids, list) or not ids or any(type(x) is not int or not 0 <= x < VOCAB for x in ids):
+            fail("invalid generation " + name + " IDs")
+    maximum, eos, reason = value.get("max_new_tokens"), value.get("eos_token_ids"), value.get("finish_reason")
+    if type(maximum) is not int or maximum < 1 or len(prompt) + maximum > 1024 or len(generated) > maximum:
+        fail("invalid generation budget")
+    if not isinstance(eos, list) or not eos or any(type(x) is not int or not 0 <= x < VOCAB for x in eos) or len(set(eos)) != len(eos):
+        fail("invalid generation EOS IDs")
+    if any(x in eos for x in generated[:-1]):
+        fail("generation continued after EOS")
+    if reason == "eos":
+        if generated[-1] not in eos:
+            fail("generation did not stop on EOS")
+    elif reason == "length":
+        if len(generated) != maximum or generated[-1] in eos:
+            fail("generation did not consume its budget")
+    else:
+        fail("invalid generation finish reason")
+    if token_ids != prompt + generated[:-1]:
+        fail("generation trace differs from evaluated tokens")
+    start = len(prompt) - 1
+    expected = np.argmax(ref_logits[start:start + len(generated)], axis=1).astype(int).tolist()
+    if generated != expected:
+        fail("generation differs from original greedy cached trace")
+    return {"greedy_choices_exact": True, "prompt_tokens": len(prompt),
+            "generated_tokens": len(generated), "finish_reason": reason}
+
+
+def _require_cached_reference(report: dict, token_count: int) -> None:
+    """Generation qualification requires the original tokenwise cache trace."""
+    if report.get("decoding_mode") != "cached":
+        fail("generation requires a cached original reference report")
+    metadata = report.get("cache_metadata")
+    if not isinstance(metadata, dict):
+        fail("generation reference cache metadata is missing")
+    expected = {
+        "cache_type": "DynamicCache",
+        "prefill_tokens": 0,
+        "decode_tokens": token_count,
+        "tokenwise": True,
+        "layer_major": True,
+    }
+    for key, value in expected.items():
+        if metadata.get(key) != value:
+            fail(f"generation reference cache metadata mismatch: {key}")
+    if report.get("logits_mode") != "all" or report.get("logits_tokens") != token_count:
+        fail("generation reference must contain all logits rows")
 
 
 def _strict_ids(ids) -> bool:
@@ -290,6 +368,9 @@ def compare(reference: Path, candidate: Path, output: Path) -> dict:
         fail("reference logits shape must be [tokens,157184]")
     ref_logits = load(reference / "logits.fp32", logit_tokens * VOCAB, "reference logits").reshape(logit_tokens, VOCAB)
     candidate_logits = load(candidate / "logits.f32", len(tokens) * VOCAB, "candidate logits").reshape(len(tokens), VOCAB)
+    if (candidate / "generation.json").is_file():
+        _require_cached_reference(report, len(tokens))
+    generation = verify_generation(candidate, tokens, ref_logits)
     route_issues = []
     try:
         reference_routes = routes_reference(reference / "layers.json", len(tokens))
@@ -332,6 +413,8 @@ def compare(reference: Path, candidate: Path, output: Path) -> dict:
               "top1_exact": top_exact, "max_errors": {"hidden_layers_max_abs": _maxerr(ref_layers, candidate_layers),
               "final_hidden_max_abs": _maxerr(ref_final, candidate_final), "logits_max_abs": _maxerr(ref_logits, candidate_logits),
               "route_weight_max_abs": route_weight_max}, "tolerances": {"output": "0.001 + 0.001 * abs(reference)", "weights": "1e-5 + 1e-4 * abs(reference)"}, "issues": issues}
+    if generation is not None:
+        result["generation"] = generation
     output.mkdir(parents=True)
     (output / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if not passed:

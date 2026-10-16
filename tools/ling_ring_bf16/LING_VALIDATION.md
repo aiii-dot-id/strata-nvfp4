@@ -3,10 +3,9 @@
 AI Identity Incorported <james@aiii.id>
 
 Measured on 2026-10-16 on an NVIDIA RTX 4070 Ti (12 GiB, sm_89), with the
-original Ling-3.0-tiny checkpoint. This record covers one bounded four-token
-forward pass and a cache-budget replay. It is a partial forward qualification;
-it is not a generation, long-context, answer-quality, throughput, serving, or
-production qualification.
+original Ling-3.0-tiny checkpoint. This record covers bounded four-token and 64/65-token forward
+evidence plus five frozen tokenizer/template generation cases. It remains partial bounded
+evidence; it is not a throughput, serving, or production qualification.
 
 ## Initial gate
 
@@ -95,21 +94,82 @@ the controller result, case-64/compare/result.json,
 case-65/compare/result.json, and prefix-diagnostic.json.
 
 The native and original paths use original BF16 weights, original F32 metadata,
-and FP32 working state; no quantization or weight conversion is involved.
+and FP32 working state. Checkpoint files are not rewritten or quantized; the
+original reference widens BF16 values exactly into FP32 working tensors.
 CUDA and cuDNN TF32 flags were disabled for the host/runtime configuration.
 That flag state does not establish precision behavior inside the installed FLA
 Triton chunk kernel: chunk_intra.py contains explicit TF32 solve constants,
 so this boundary evidence must not be described as a Triton precision
 qualification.
 
+## Original cached-decoding comparison
+
+The current 65-token trace also passed against the original model using its
+unmodified tokenwise `DynamicCache` API. Every call has one token, so the
+original KDA implementation selects its recurrent path naturally; no KDA mode
+was overridden. All 1,495 ordered routes and all 65 top-1 choices matched.
+Maximum errors were `0.000377655029296875` for hidden layers,
+`7.343292236328125e-05` for final hidden, `2.9087066650390625e-05` for
+logits, and `1.6688276978094052e-06` for route weights. The exact retained
+comparison is `forward65/compare/result.json` under
+`/work/AI/experiments/ling-cached-generation-20261016-r1/`.
+
+This qualifies that cached tokenwise protocol on this trace. The historical
+65-token batched/chunk comparison above remains failed and is a separate
+protocol. Matching cached decoding does not qualify batched prefill.
+
+## Bounded generation evidence
+
+The verified native tokenizer/template frontend was exercised with the frozen
+Ling generation plans under `/work/AI/experiments/ling-cached-generation-20261016-r1/`.
+All completed cases used original BF16 checkpoint weights, FP32 working state,
+original EOS ID 156895, greedy decoding, and exact native/reference choice
+comparison. The tested native executable was
+`/work/AI/experiments/ling-cached-generation-20261016-r1/build/strata_ling_bf16`,
+with SHA-256 `af5ffc056e93cf4394b455ac42d5cb7b8ad544d7d2e5372e47e2bb1124d43c46`;
+the Ling engine source pin was
+`2dc8f2208de094704a41e8826a3f02a3da03cfc4d8e965558e5f5d80f70eaf40`.
+
+Completed functional cases:
+
+- Thinking off, `17+25`, max 128: strict comparison passed and the EOS answer
+  check returned exact final answer `42`.
+- Thinking off, JSON sum/language request, max 128: strict comparison passed
+  and the EOS answer check returned the exact requested JSON object.
+- Thinking on, `19*23`, max 512: an independent decoded-output diagnostic found
+  EOS, exact final answer `437`, and exact greedy choices. The stronger
+  recompare receipt still fails strict comparison for one ordered route at
+  token 337, layer 19. The selected expert set is equal; experts 116 and 124
+  are exchanged in order. The decoded answer is not a controller answer gate
+  and does not waive the strict route-order failure.
+- Thinking off, the frozen 511-token prompt (521 evaluated tokens including
+  generation) with final `17+25`, max 32: strict comparison passed, 11 generated
+  tokens ended by EOS with exact final answer `42`, 11,983 route rows, zero
+  ordered-route mismatches, and exact top-1 logits. Maximum errors were
+  `0.00075531005859375` hidden layers, `0.00006961822509765625` final hidden,
+  `0.00009965896606445312` logits, and `0.000013947938110381308` route weight.
+
+The completed receipts are retained with their individual PLAN, RESULT, native
+provenance, reference, and comparator files under the experiment directory.
+The one-token length-control case also passed strict comparison and its declared
+length-control check. A stronger CPU recompare receipt covering all five cases
+is retained at `/work/AI/experiments/ling-cached-generation-20261016-r1/recompare-r3/receipt.json`;
+it used comparator SHA-256
+`1bf606377002120e85ca79bdb4ba63e95fb448424c95ef530a47e265c3fab811` and the
+isolated Ling suite recorded 151 passed tests with no skips. Four of the five
+recompares passed; thinking-on remains the one strict order-only failure. These
+generation results are bounded functional and parity evidence; they do not
+establish broad answer quality, sampling behavior, throughput, or production
+serving readiness.
+
 ## Boundaries
 
 The measured four-token and 64-token cases are bounded forward comparisons.
 The 65-token default-path strict failure remains open despite the successful
 forced-recurrent diagnostic; default chunk-path parity is not established.
-Generation, tokenizer/chat-template behavior, sampling, answer quality,
-throughput, memory-pressure qualification, and production serving remain
-unmeasured. The native path is an opt-in executor and does not change the
+Sampling, throughput, memory-pressure qualification, and production serving
+remain unmeasured. The answer checks are narrow frozen controls, not broad
+answer-quality evidence. The native path is an opt-in executor and does not change the
 default runtime or establish a release claim.
 
 The CPU reference attempt is not a substitute for the original GPU result:

@@ -1,5 +1,6 @@
 // AI Identity Incorported <james@aiii.id>
 #include "strata/ling/mla.hpp"
+#include "strata/ring/generation.hpp"
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -7,6 +8,10 @@
 
 int main() {
   using namespace strata::ling;
+  strata::ring::GreedyGeneration bounded({1,2,3}, 4, {9}, 32, 8);
+  MlaCache generation_capacity(MlaConfig{}, bounded.kv_capacity());
+  assert(bounded.kv_capacity() == 7);
+  assert(generation_capacity.capacity() == bounded.kv_capacity());
   MlaConfig c{2,2,4,2,100.0f};
   MlaCache cache(c,3);
   std::vector<float> q(12),kn(4),kr(4),v{2,4,6,8},g(2);

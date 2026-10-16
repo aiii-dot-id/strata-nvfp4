@@ -230,11 +230,24 @@ static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
 }
 int main(int argc,char **argv) {
   try {
-    if(argc!=7) throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID");
+    if(argc < 7 || (argc - 7) % 2)
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV]");
+
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
-    const auto tokens=sr::vocabulary_ids(argv[3],157184);
-    if(tokens.empty() || tokens.size()>1024) throw std::runtime_error("token count must be 1..1024");
+    size_t generate=0; std::vector<int> eos; std::vector<std::string> options;
+    for(int i=7;i<argc;i+=2) {
+      const std::string option=argv[i];
+      if(std::find(options.begin(),options.end(),option)!=options.end()) throw std::invalid_argument("duplicate option");
+      options.push_back(option);
+      if(option=="--generate") generate=sr::unsigned_decimal(argv[i+1]);
+      else if(option=="--eos") eos=sr::vocabulary_ids(argv[i+1],157184);
+      else throw std::invalid_argument("unknown option");
+    }
+    if(generate>1024) throw std::invalid_argument("generation exceeds 1024-token bound");
+    if(generate && eos.empty()) throw std::invalid_argument("generation needs EOS IDs");
+    sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3],157184),generate,eos,157184,1024);
+    const auto &tokens=generation.evaluated();
     const size_t cache_mib=sr::unsigned_decimal(argv[5]);
     if(cache_mib<5 || cache_mib>2048) throw std::runtime_error("cache budget must be 5..2048 MiB");
     const std::string identity=argv[6];
@@ -271,7 +284,7 @@ int main(int argc,char **argv) {
     std::vector<std::unique_ptr<KdaLayer>> kda(24);
     std::vector<std::unique_ptr<sl::MlaCache>> mla(24);
     for(size_t l=0;l<24;++l) {
-      if(l%4==3) mla[l]=std::make_unique<sl::MlaCache>(sl::MlaConfig{},tokens.size());
+      if(l%4==3) mla[l]=std::make_unique<sl::MlaCache>(sl::MlaConfig{},generation.kv_capacity());
       else kda[l]=std::make_unique<KdaLayer>(store,"model.layers."+std::to_string(l)+".attention.");
     }
     const sr::RouterConfig routing{128,8,4,8,2.5f};
@@ -314,9 +327,15 @@ int main(int argc,char **argv) {
       }
       h=norm(h,store.tensor("model.norm.weight"));write_row(output/"final-hidden.f32",h);
       auto logits=mv.apply(store.tensor("lm_head.weight"),h);write_row(output/"logits.f32",logits);
+      if(generation.sampling_position(pos)) generation.sample(pos,logits);
       std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
     }
     check_cancelled(); auto stats=cache.stats(); routes.flush();
+    if(generate) {
+      std::ofstream generated(output/"generation.json");
+      generated << generation.receipt("strata-ling-generation-v1"); generated.flush();
+      if(!generated) throw std::runtime_error("generation receipt write failed");
+    }
     if(!routes) throw std::runtime_error("route trace write failed");
     std::ostringstream token_json;token_json<<'[';
     for(size_t i=0;i<tokens.size();++i){if(i) token_json<<',';token_json<<tokens[i];}token_json<<']';

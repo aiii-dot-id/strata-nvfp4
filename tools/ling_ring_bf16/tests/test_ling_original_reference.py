@@ -1,5 +1,5 @@
 from pathlib import Path
-import importlib.util, json, os, subprocess, sys, types
+import importlib.util, json, os, struct, subprocess, sys, types
 import numpy as np
 import pytest
 ROOT = Path(__file__).resolve().parents[3]
@@ -52,3 +52,75 @@ def test_report_writer_and_comparator_contract(tmp_path):
     assert written["hidden_layers_shape"] == [24, tokens, 1536]; assert written["logits_shape"] == [1, tokens, 157184]; assert written["logits_tokens"] == tokens
     cmp._reference_identity(written); cmp.verify_reference_hashes(out, written); cmp._reference_source(written)
     assert len(cmp.routes_reference(out / "layers.json", tokens)) == 23 * tokens
+
+
+def test_cached_mode_metadata_and_cli_contract(tmp_path):
+    mod = load_runner()
+    source_text = Path(RUNNER).read_text()
+    assert "DynamicCache" in source_text
+    assert "finals.append(final.detach()" in source_text
+    assert "finals.append(hidden.detach()" not in source_text
+    help_result = __import__("subprocess").run([str(ENV), str(RUNNER), "--help"], capture_output=True, text=True)
+    assert help_result.returncode == 0
+    assert "--decoding-mode" in help_result.stdout
+    class Args:
+        source = str(tmp_path / "modeling.py")
+        checkpoint = str(tmp_path)
+        device = "cuda"
+        logits_mode = "all"
+    (tmp_path / "modeling.py").write_text("source")
+    (tmp_path / "config.json").write_text(json.dumps({"num_hidden_layers": 24, "hidden_size": 1536, "vocab_size": 157184, "num_experts": 128, "num_experts_per_tok": 8}))
+    fake_torch = types.SimpleNamespace(__version__="test", version=types.SimpleNamespace(cuda=None), backends=types.SimpleNamespace(cuda=types.SimpleNamespace(matmul=types.SimpleNamespace(allow_tf32=False)), cudnn=types.SimpleNamespace(allow_tf32=False)))
+    report = mod.build_report(Args(), types.SimpleNamespace(num_hidden_layers=24, hidden_size=1536, vocab_size=157184), [1], np.zeros((1, 1, 1536), dtype=np.float32), np.zeros((1, 1, 157184), dtype=np.float32), {"modeling": {"sha256": "a" * 64}, "configuration": {"sha256": "b" * 64}}, {"config": {"sha256": "c" * 64}}, fake_torch, tmp_path, 0.0, "cached", {"cache_type": "DynamicCache", "tokenwise": True})
+    assert report["decoding_mode"] == "cached"
+    assert report["cache_metadata"] == {"cache_type": "DynamicCache", "tokenwise": True}
+
+
+def test_cached_trace_state_control():
+    mod = load_runner()
+    rows = [[np.zeros(3, dtype=np.float32)] for _ in range(2)]
+    routes = [{"layer": 0, "router_ids": [], "router_weights": []}, {"layer": 1, "router_ids": [[0] * 8], "router_weights": [[0.125] * 8]}]
+    assert mod.validate_cached_trace(rows, routes, 1, 2)
+    with pytest.raises(mod.ReferenceError, match="token count"):
+        mod.validate_cached_trace([rows[0], []], routes, 1, 2)
+
+
+def _write_safetensor_fixture(tmp_path, entry, raw_payload=b"\x00\x00\x00\x00"):
+    root = tmp_path / "checkpoint"; root.mkdir()
+    (root / "config.json").write_text("{}")
+    (root / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {"x": "model.safetensors"}}))
+    header = json.dumps({"x": entry}, separators=(",", ":")).encode()
+    (root / "model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header + raw_payload)
+    return root
+
+
+def test_safetensor_duplicate_json_key_rejected(tmp_path):
+    mod = load_runner()
+    path = tmp_path / "index.json"
+    path.write_text('{"weight_map":{"x":"model.safetensors"},"weight_map":{"y":"model.safetensors"}}')
+    with pytest.raises(mod.ReferenceError, match="duplicate JSON key"):
+        mod.readj(path)
+
+
+@pytest.mark.parametrize("entry,pattern", [
+    ({"dtype": "F16", "shape": [2], "data_offsets": [0, 4]}, "unsupported dtype"),
+    ({"dtype": "BF16", "shape": [-1], "data_offsets": [0, 2]}, "invalid shape"),
+    ({"dtype": "BF16", "shape": [2], "data_offsets": [4, 2]}, "invalid offsets"),
+    ({"dtype": "BF16", "shape": [2], "data_offsets": [0, 2]}, "bounds/length"),
+])
+def test_safetensor_header_validation_rejects_invalid_metadata(tmp_path, entry, pattern):
+    mod = load_runner(); root = _write_safetensor_fixture(tmp_path, entry)
+    index = mod.SafeTensorIndex(root)
+    with pytest.raises(mod.ReferenceError, match=pattern):
+        index.raw("x", None, "cpu")
+
+
+def test_safetensor_truncated_header_rejected(tmp_path):
+    mod = load_runner()
+    root = tmp_path / "checkpoint"; root.mkdir()
+    (root / "config.json").write_text("{}")
+    (root / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {"x": "model.safetensors"}}))
+    (root / "model.safetensors").write_bytes(b"\x08\x00\x00\x00")
+    mod = load_runner()
+    with pytest.raises(mod.ReferenceError, match="truncated shard"):
+        mod.SafeTensorIndex(root)

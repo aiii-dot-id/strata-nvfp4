@@ -26,13 +26,16 @@ The executors are reference tools and do not provide the production server
 or production model-loader integration. The Ring token-ID executor has a
 separate greedy frontend that uses the original checkpoint tokenizer and chat
 template. Ling has an original-model forward reference runner with KDA/MLA
-execution and bounded four-token plus 64/65-token GPU evidence recorded in
-`LING_VALIDATION.md`. The 64-token case passed its strict gates; the standard
-65-token case failed strict comparison with 319 ordered-route differences. A separate fused-recurrent 65-token
-diagnostic matched its strict numeric and route gates, but is diagnostic-only
-and does not qualify the default path; long-context and production
-qualification remain pending. There are no timing
-comparison or throughput claims here.
+execution. Bounded four-token, current cached 65-token, and 511-token
+long-context generation cases passed their declared strict gates. The
+historical batched 65-token default-path comparison remains a recorded strict
+failure with 319 ordered-route differences; its forced-recurrent diagnostic is
+separate evidence and does not qualify the default path. Thinking-on generation
+had an independent decoded diagnostic with exact answer 437 and EOS but retains
+one strict ordered-route failure with an equal expert set. The one-token
+length-control case passed.
+These are bounded forward, parity, and functional answer checks; there are no
+timing comparison, throughput, broad answer-quality, or production claims.
 
 Author attribution: AI Identity Incorported <james@aiii.id>
 
@@ -97,6 +100,21 @@ The CUDA executor's bounded cache and workspace checks fail before execution
 when the requested GPU budget cannot fit. It never stops another process.
 CUDA execution is hardware qualification work and is separate from CPU tests.
 
+The optional Ring `fp32-cublas` backend is a diagnostic comparison only. It
+widens each resident BF16 matrix into a temporary FP32 buffer of
+1,287,651,328 bytes (about 1.2 GiB), uses pedantic cuBLAS math with atomics
+disabled, and keeps the normal bounded expert cache. It is not an optimization
+or promotion claim. The frozen external protocol, source bindings, and result
+records are under
+`/work/AI/experiments/ring-cublas-qualification-20261016`; the candidate
+executable SHA-256 is
+`30df55ecd84b668b2e33d4d9510085d23e4757694e89941c9fd4b4e4848d5001`.
+The 4-position diagnostic passed the unchanged strict gate; the 173-position
+diagnostic reproduced the default backend's position-172/layer-7 route flip.
+Longer cuBLAS cases were not run after that failure. A separate 4-position
+default-backend regression subsequently passed bitwise against its frozen
+outputs; its result is retained outside the source tree.
+
 ## Run and compare Ring
 
 Run these commands from the repository root. Use fresh output directories and
@@ -150,9 +168,12 @@ python3 tools/ling_ring_bf16/compare_ring_reference.py \
 The Ling runner streams the original 24 decoder layers one at a time, widens
 BF16 checkpoint tensors to FP32, records all hidden states, logits, and routed
 expert traces, and emits comparator-compatible provenance. It covers the
-source KDA/MLA implementation and the 24-layer geometry. It is a token-ID
-reference runner; text tokenization and generation are outside this Ling
-forward tool.
+source KDA/MLA implementation and the 24-layer geometry. The separate verified
+Ling generation frontend applies the original tokenizer and chat template,
+performs greedy decoding, binds EOS configuration, and compares generated
+choices against the original reference logits. Its completed cases and limits
+are recorded in `LING_VALIDATION.md`; this remains bounded evidence rather than
+production serving or broad answer-quality qualification.
 
 Use the isolated reference environment prepared for Ling:
 
@@ -261,11 +282,14 @@ fixture SHA-256 values against their export manifests before execution.
 ## Architecture boundary
 
 Ring and the Ling original-model reference are implemented as opt-in tools. Ling
-has bounded four-token and 64/65-token GPU evidence; the 64-token case passed
-its strict gates, while the standard 65-token case failed strict comparison
-with 319 ordered-route differences. The forced-recurrent diagnostic completed with strict scoped gates but remains
-diagnostic-only; it does not qualify the default path. Longer contexts,
-production serving, Ling generation integration, and any production default
-changes remain pending. Ring's separate generation frontend uses the
-original checkpoint tokenizer and chat template, as described above. The
-existing production Qwen runtime files and defaults remain unchanged.
+has bounded four-token, current cached 65-token, and 511-token long-context
+GPU evidence. The historical batched standard 65-token comparison failed with
+319 ordered-route differences; the forced-recurrent diagnostic is separate and
+diagnostic-only. Five frozen generation cases completed: four strict
+recompares passed, while thinking-on retains one ordered expert-route swap
+although its independent decoded answer was 437. The one-token length-control
+case passed. These are bounded forward, parity, and narrow functional controls;
+they do not qualify broad answer quality, production serving, throughput, or
+production defaults. Ring's separate generation frontend uses the original
+checkpoint tokenizer and chat template, as described above. The existing
+production Qwen runtime files and defaults remain unchanged.

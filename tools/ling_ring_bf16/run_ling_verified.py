@@ -149,12 +149,16 @@ def _checkpoint_files(checkpoint: Path) -> dict:
 def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
     original = {name: _pin(checkpoint / name, f"original source {name}") for name in
                 ("modeling_bailing_moe_v3.py", "configuration_bailing_moe_v3.py")}
+    # Keep this closure aligned with ling/CMakeLists.txt.  The Ling CUDA
+    # target links these three Ring translation units; unrelated Ring engine
+    # and attention sources must not make an in-progress Ring change alter a
+    # Ling receipt.
     paths = [
         *sorted((repo / "include/strata/ling").glob("*.hpp")),
         *sorted((repo / "src/ling").glob("*")),
-        repo / "src/ling/engine.cu",
         *sorted((repo / "include/strata/ring").glob("*.hpp")),
-        *sorted((repo / "src/ring").glob("*")),
+        *(repo / "src/ring" / name for name in
+          ("routing.cpp", "expert_cache.cpp", "tensor_store.cpp")),
         repo / "include/strata/kernels/bf16_gemv.hpp",
         repo / "include/strata/kernels/bf16_bits.hpp",
         repo / "include/strata/kernels/pdl.hpp",
@@ -163,6 +167,7 @@ def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
         repo / "tools/ling_ring_bf16/prepare_ling_manifest.py",
         repo / "tools/ling_ring_bf16/ling/CMakeLists.txt",
         repo / "tools/ling_ring_bf16/run_ling_verified.py",
+        repo / "tools/ling_ring_bf16/generate_ling.py",
     ]
     relevant = {}
     seen = set()
@@ -175,11 +180,17 @@ def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path) -> dict:
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=()) -> dict:
     original, relevant = _source_files(checkpoint, repo)
+    frontend = {}
+    for path in binding_files:
+        path = _file(Path(path), "frontend binding")
+        try: name = str(path.relative_to(checkpoint))
+        except ValueError as exc: raise VerificationError("frontend binding must be inside checkpoint") from exc
+        frontend[name] = _pin(path, "frontend binding")
     return {"checkpoint": _checkpoint_files(checkpoint), "original_source": original,
             "relevant_source": relevant, "manifest": _pin(manifest, "manifest"),
-            "executable": _pin(executable, "executable")}
+            "executable": _pin(executable, "executable"), "frontend": frontend}
 
 
 def _tokens(text: str) -> list[int]:
@@ -195,19 +206,57 @@ def _tokens(text: str) -> list[int]:
     return values
 
 
-def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str) -> dict:
+def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str, generate: int = 0) -> dict:
     execution = _read_json(path, "execution receipt")
     expected = {"status": "executed", "model": MODEL, "activation_dtype": "FP32",
-                "quantized": False, "layers": LAYERS, "tokens": len(token_ids),
-                "token_ids": token_ids, "checkpoint_id": checkpoint_id}
+                "quantized": False, "layers": LAYERS, "checkpoint_id": checkpoint_id}
     for key, value in expected.items():
         if execution.get(key) != value:
             raise VerificationError(f"execution receipt mismatch: {key}")
-    if type(execution.get("quantized")) is not bool:
-        raise VerificationError("execution quantized must be boolean")
-    if execution.get("logits_mode") != "all" or execution.get("logits_tokens") != len(token_ids):
-        raise VerificationError("Ling execution must emit all logits rows")
+    if type(execution.get("quantized")) is not bool or execution.get("quantized") is not False:
+        raise VerificationError("execution quantized must be false boolean")
+    evaluated = execution.get("token_ids")
+    if not isinstance(evaluated, list) or any(type(x) is not int or isinstance(x, bool) or x < 0 or x >= VOCAB for x in evaluated):
+        raise VerificationError("execution token identity is invalid")
+    if type(execution.get("tokens")) is not int or isinstance(execution.get("tokens"), bool):
+        raise VerificationError("execution token count is invalid")
+    if generate:
+        if execution.get("logits_mode") != "all" or execution.get("logits_tokens") != len(execution.get("token_ids", [])):
+            raise VerificationError("generation execution must retain all logits")
+        evaluated = execution.get("token_ids")
+        if not isinstance(evaluated, list) or evaluated[:len(token_ids)] != token_ids or not len(token_ids) <= len(evaluated) <= len(token_ids) + generate:
+            raise VerificationError("generated execution token trace is invalid")
+        if execution.get("tokens") != len(evaluated):
+            raise VerificationError("generated execution token count mismatch")
+    else:
+        if execution.get("tokens") != len(token_ids) or execution.get("token_ids") != token_ids:
+            raise VerificationError("execution token identity mismatch")
+        if execution.get("logits_mode") != "all" or execution.get("logits_tokens") != len(token_ids):
+            raise VerificationError("Ling execution must emit all logits rows")
     return execution
+def _parse_eos(text: str) -> list[int]:
+    try: values=[int(x,10) for x in text.split(",")]
+    except ValueError as exc: raise VerificationError("EOS IDs must be decimal integers") from exc
+    if not values or any(type(x) is not int or x < 0 or x >= VOCAB for x in values) or len(set(values)) != len(values):
+        raise VerificationError("EOS IDs must be unique vocabulary IDs")
+    return values
+def _require_generation(path: Path, token_ids: list[int], maximum: int, eos_ids: list[int], schema: str = "strata-ling-generation-v1") -> dict:
+    value=_read_json(path, "generation receipt")
+    if value.get("schema") != schema:
+        raise VerificationError("generation receipt schema mismatch")
+    prompt=value.get("prompt_token_ids"); generated=value.get("generated_token_ids")
+    configured=value.get("eos_token_ids"); declared=value.get("max_new_tokens")
+    if (not isinstance(prompt,list) or any(type(x) is not int or isinstance(x,bool) or x < 0 or x >= VOCAB for x in prompt)
+        or prompt != token_ids or configured != eos_ids or type(declared) is not int or isinstance(declared,bool)
+        or declared != maximum or not isinstance(generated,list) or not generated
+        or any(type(x) is not int or isinstance(x,bool) or x < 0 or x >= VOCAB for x in generated) or len(generated)>maximum):
+        raise VerificationError("generation token trace is invalid")
+    if any(x in eos_ids for x in generated[:-1]): raise VerificationError("generation continued after EOS")
+    reason=value.get("finish_reason")
+    if reason not in {"eos","length"}: raise VerificationError("generation finish reason is invalid")
+    if reason=="eos" and generated[-1] not in eos_ids: raise VerificationError("EOS trace does not end in configured EOS")
+    if reason=="length" and (len(generated)!=maximum or generated[-1] in eos_ids): raise VerificationError("length trace does not consume budget")
+    return value
 
 
 def _finite_f32(path: Path, expected_bytes: int, label: str) -> None:
@@ -261,9 +310,10 @@ def _route_rows(path: Path, tokens: int) -> None:
         raise VerificationError(f"route rows incomplete: expected {len(expected)}, got {len(seen)}")
 
 
-def _native_outputs(output: Path, tokens: int) -> dict:
+def _native_outputs(output: Path, tokens: int, generation: bool = False) -> dict:
     result = {}
-    for name in EXPECTED_NATIVE:
+    names = EXPECTED_NATIVE + (("generation.json",) if generation else ())
+    for name in names:
         path = _file(output / name, f"native output {name}")
         if name.startswith("layer-") or name == "final-hidden.f32":
             _finite_f32(path, tokens * HIDDEN * 4, name)
@@ -276,7 +326,7 @@ def _native_outputs(output: Path, tokens: int) -> dict:
 
 
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path,
-                 cache_mib: int, timeout: float = 1800) -> dict:
+                 cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None, binding_files=()) -> dict:
     checkpoint, manifest, executable, output = (Path(x).resolve() for x in (checkpoint, manifest, executable, output))
     repo = Path(__file__).resolve().parents[2]
     token_ids = _tokens(tokens)
@@ -284,6 +334,14 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError(f"refusing existing output: {output}")
     if type(cache_mib) is not int or not 5 <= cache_mib <= 2048:
         raise VerificationError("cache budget must be 5..2048 MiB")
+    if type(generate) is not int or generate < 0 or generate > MAX_TOKENS - len(token_ids):
+        raise VerificationError("generate must fit within the 1024-token evaluation window")
+    if generate:
+        if isinstance(eos_ids,str): parsed_eos=_parse_eos(eos_ids)
+        else: parsed_eos=list(eos_ids or [])
+        if not parsed_eos or len(set(parsed_eos)) != len(parsed_eos) or any(type(x) is not int or x < 0 or x >= VOCAB for x in parsed_eos):
+            raise VerificationError("EOS IDs are mandatory and must be unique vocabulary IDs")
+    else: parsed_eos=[]
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 86400:
         raise VerificationError("timeout must be between 0 and 86400 seconds")
     _file(executable, "executable")
@@ -299,25 +357,35 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         if requested.read_bytes() != generated.read_bytes():
             raise VerificationError("requested manifest differs from freshly prepared manifest")
     checkpoint_id = _sha(manifest)
-    before = _all_inputs(checkpoint, manifest, executable, repo)
+    if generate and not {"tokenizer.json", "tokenizer_config.json", "generation_config.json"} <= {Path(x).name for x in binding_files}:
+        raise VerificationError("generation requires tokenizer and generation-config bindings")
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), checkpoint_id]
+    if generate:
+        argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos))]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
     if returncode != 0:
         raise VerificationError(f"Ling executable failed ({returncode}): {stderr.strip()[-2000:]}")
     if not output.is_dir():
         raise VerificationError("Ling executable did not create output directory")
-    after = _all_inputs(checkpoint, manifest, executable, repo)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id)
-    native = _native_outputs(output, len(token_ids))
+    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate)
+    evaluated_tokens = len(execution.get("token_ids", token_ids))
+    native = _native_outputs(output, evaluated_tokens, bool(generate))
     receipt = {"schema": "strata-ling-verified-run-v1", "status": "verified",
                "model": MODEL, "checkpoint_id": checkpoint_id, "checkpoint": before["checkpoint"],
                "original_source": before["original_source"], "relevant_source": before["relevant_source"],
-               "manifest": before["manifest"], "executable": before["executable"], "argv": argv,
+               "manifest": before["manifest"], "executable": before["executable"], "frontend": before["frontend"], "argv": argv,
                "cache_mib": cache_mib, "execution": execution, "native_outputs": native,
-               "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, and original model/configuration sources hashed before and after execution",
+               "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, original model/configuration sources, and the Ling build source closure (all Ling sources/headers, shared headers, the three linked Ring translation units, CUDA kernels, CMake, wrapper, and frontend) hashed before and after execution",
                          "reference": "native Ling forward receipt and structural outputs only; no claim of original equivalence, activation quality, or production readiness"}}
+    if generate:
+        receipt["generation"] = _require_generation(output / "generation.json", token_ids, generate, parsed_eos)
+        expected = token_ids + receipt["generation"]["generated_token_ids"][:-1]
+        if execution.get("token_ids") != expected:
+            raise VerificationError("generated execution trace must omit only the last sampled token")
     (output / "provenance.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return receipt
 
@@ -331,9 +399,12 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cache-mib", required=True, type=int)
     parser.add_argument("--timeout", type=float, default=1800)
+    parser.add_argument("--generate", type=int, default=0)
+    parser.add_argument("--eos", help="comma-separated EOS IDs; required with --generate")
+    parser.add_argument("--bind-file", action="append", type=Path, default=[], help="checkpoint-local frontend file to hash and bind")
     args = parser.parse_args()
     try:
-        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout), indent=2, sort_keys=True))
+        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0
