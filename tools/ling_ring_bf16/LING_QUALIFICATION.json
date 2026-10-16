@@ -1,0 +1,643 @@
+{
+  "architecture": {
+    "experts": 128,
+    "hidden_size": 1536,
+    "kda_layers": 18,
+    "layers": 24,
+    "mla_layers": 6,
+    "route_layers": 23,
+    "route_rows": 92,
+    "top_k": 8,
+    "vocab_size": 157184
+  },
+  "author": "AI Identity Incorported <james@aiii.id>",
+  "boundaries": [
+    "four-token partial forward plus bounded 64-token GPU boundary evidence",
+    "65-token standard original-reference strict comparison failed; forced-recurrent diagnostic passed its numerical checks but does not qualify the default path",
+    "no generation or tokenizer qualification",
+    "no answer-quality, throughput, serving, or production claim",
+    "CPU KDA/MLA tests are separate from actual GPU original-reference equivalence",
+    "no Mac GPU qualification",
+    "CUDA TF32 flags were disabled, but this does not establish Triton/FLA chunk-kernel precision; installed FLA chunk_intra.py contains explicit TF32 solve constants"
+  ],
+  "boundary_validation": {
+    "cache_replay": "initial 4-token native trace replay passed bitwise at the recorded 5 MiB and 1024 MiB budgets",
+    "case_64": {
+      "max_errors": {
+        "final_hidden": 3.814697265625e-05,
+        "hidden_layers": 0.000202178955078125,
+        "logits": 3.0517578125e-05,
+        "route_weight": 1.0708093260980434e-06
+      },
+      "result": "/work/AI/experiments/ling-strata-20261016/boundary-preparation/case-64/compare/result.json",
+      "route_count": 1472,
+      "route_mismatch_count": 0,
+      "sha256": "0c41b11198db8b21fae95b386f64e11ffc14fe31501dff80ffb8e8d740a91b70",
+      "status": "passed",
+      "tokens": 64,
+      "top1_exact": true
+    },
+    "case_65": {
+      "max_errors": {
+        "final_hidden": 3.1274614334106445,
+        "hidden_layers": 17.52444076538086,
+        "logits": 1.4571490287780762,
+        "route_weight": 0.18729710610913086
+      },
+      "result": "/work/AI/experiments/ling-strata-20261016/boundary-preparation/case-65/compare/result.json",
+      "route_count": 1495,
+      "route_mismatch_count": 319,
+      "sha256": "a5c2f5b43f2a399d833b55fdb9f9a5c19827d17217c0093754f1e5b197660fd6",
+      "status": "failed_strict_comparison",
+      "tokens": 65,
+      "top1_exact": true
+    },
+    "controller_result": {
+      "result": "/work/AI/experiments/ling-strata-20261016/boundary-preparation/RESULT.json",
+      "sha256": "ac39f2960f17164d86956802dd6903fc3a0f3316b9d2f9a1a20f6ff2aa176871"
+    },
+    "forced_recurrent_65": {
+      "default_path_qualification": false,
+      "driver_sha256": "d8cddc05db6ba6b90807ca12e85ed8905e571cbd3ab9a979ece1ef8f26ba2ca2",
+      "interpretation": "Scoped fused_recurrent diagnostic matched strict numeric and route gates; it does not qualify the default path, HF default behavior beyond 64 tokens, or isolate the cause to one Triton operation.",
+      "max_errors": {
+        "final_hidden": 5.245208740234375e-05,
+        "hidden_layers": 0.000274658203125,
+        "logits": 2.956390380859375e-05,
+        "route_weight": 1.1323858948308896e-06
+      },
+      "mode": "all 18 original KDA layers forced to fused_recurrent by a separate diagnostic driver",
+      "numeric_gates_satisfied": true,
+      "ordered_route_mismatches": 0,
+      "reference_report_sha256": "ddda8e95b75225bd668ca9c0fc73d7747135fa469ae2e43410179000567ab827",
+      "report": "/work/AI/experiments/ling-strata-20261016/boundary-preparation/RECURRENT65-DIAGNOSTIC.json",
+      "route_rows": 1495,
+      "route_set_mismatches": 0,
+      "sha256": "3d2c42cc45d01fa6598b1fb7a1c94788263a8036850f791633556053c008a785",
+      "status": "diagnostic-only",
+      "top1_exact": true
+    },
+    "initial_4_token_gate": "passed",
+    "input_cases": [
+      64,
+      65
+    ],
+    "interpretation": "All 65 top-1 logits matched, but strict FP32 output and ordered-route gates failed at 319 route positions. This is not a completed long-context qualification.",
+    "model": "Ling-3.0-tiny",
+    "prefix_diagnostic": {
+      "result": "/work/AI/experiments/ling-strata-20261016/boundary-preparation/prefix-diagnostic.json",
+      "sha256": "ec49a11ce06164352dae28f0bee84bec8d461e708172fda009df82168aca4ecc",
+      "status": "diagnostic-only"
+    },
+    "remaining": "The forced-recurrent diagnostic completed as diagnostic-only; the standard 65-token default-path strict comparison remains failed.",
+    "status": "bounded-evidence-only"
+  },
+  "cache_replay": {
+    "bitwise_files": 27,
+    "budgets_mib": [
+      1024,
+      5
+    ],
+    "files": {
+      "final-hidden.f32": true,
+      "layer-0.f32": true,
+      "layer-1.f32": true,
+      "layer-10.f32": true,
+      "layer-11.f32": true,
+      "layer-12.f32": true,
+      "layer-13.f32": true,
+      "layer-14.f32": true,
+      "layer-15.f32": true,
+      "layer-16.f32": true,
+      "layer-17.f32": true,
+      "layer-18.f32": true,
+      "layer-19.f32": true,
+      "layer-2.f32": true,
+      "layer-20.f32": true,
+      "layer-21.f32": true,
+      "layer-22.f32": true,
+      "layer-23.f32": true,
+      "layer-3.f32": true,
+      "layer-4.f32": true,
+      "layer-5.f32": true,
+      "layer-6.f32": true,
+      "layer-7.f32": true,
+      "layer-8.f32": true,
+      "layer-9.f32": true,
+      "logits.f32": true,
+      "routes.tsv": true
+    },
+    "passed": true
+  },
+  "comparison": {
+    "max_errors": {
+      "final_hidden_max_abs": 3.337860107421875e-06,
+      "hidden_layers_max_abs": 0.00030517578125,
+      "logits_max_abs": 9.5367431640625e-06,
+      "route_weight_max_abs": 5.973287964256002e-07
+    },
+    "passed": true,
+    "route_count": 92,
+    "route_mismatch_count": 0,
+    "tolerances": {
+      "output": "0.001 + 0.001 * abs(reference)",
+      "weights": "1e-5 + 1e-4 * abs(reference)"
+    },
+    "top1_exact": true
+  },
+  "domains": {
+    "outputs": "FP32",
+    "quantized": false,
+    "weights": "original BF16 matrices and original F32 metadata tensors",
+    "working_state": "FP32"
+  },
+  "evidence": {
+    "cache_receipt": "RESULT.json",
+    "comparison": "compare4/result.json",
+    "directory": "/work/AI/experiments/ling-strata-20261016/initial",
+    "native_receipt": "native4/provenance.json",
+    "reference_report": "original4/report.json"
+  },
+  "gates": {
+    "all_top1": "exact",
+    "cache_replay": "bitwise",
+    "hidden_atol": 0.001,
+    "hidden_rtol": 0.001,
+    "ordered_routes": "exact",
+    "route_weights_atol": 1e-05,
+    "route_weights_rtol": 0.0001
+  },
+  "hardware": {
+    "cuda_architecture": 89,
+    "gpu": "NVIDIA RTX 4070 Ti",
+    "vram_gib": 12
+  },
+  "input": {
+    "token_ids": [
+      156890,
+      128,
+      256,
+      1024
+    ],
+    "tokens": 4
+  },
+  "model": "Ling-3.0-tiny",
+  "pins": {
+    "checkpoint": {
+      "config": {
+        "path": "/work/AI/checkpoints/Ling-3.0-tiny/config.json",
+        "sha256": "9750d847957913f665a13c0b5a6537199e33c6f3ec970d9fcb55a0e5076d4012",
+        "size": 2130
+      },
+      "index": {
+        "path": "/work/AI/checkpoints/Ling-3.0-tiny/model.safetensors.index.json",
+        "sha256": "84ef9fe8ef967eeb0545deb1d23c0ce54e86e6b18fa943a7903d7354a79f9cf9",
+        "size": 833614
+      },
+      "shards": {
+        "model-00000-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00000-of-00032.safetensors",
+          "sha256": "9bb303a6dd00e834995ea7be63edbd8558f46dece92bd1c0f8f0eaa57bf39693",
+          "size": 1132407184
+        },
+        "model-00001-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00001-of-00032.safetensors",
+          "sha256": "1c1ad79385a0ec2a9ee7be3314b829c80040c9f001f9595a75645ca666bb556b",
+          "size": 377516376
+        },
+        "model-00002-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00002-of-00032.safetensors",
+          "sha256": "4d01a9623f463083dc79975a809b7517b12126a85a6572d6368076824ba8cf59",
+          "size": 377516376
+        },
+        "model-00003-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00003-of-00032.safetensors",
+          "sha256": "4575f56fe8bb9532062fc11eda2321ec19392dc0d3a36a042fcb1a970be89561",
+          "size": 377516376
+        },
+        "model-00004-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00004-of-00032.safetensors",
+          "sha256": "ecf2a369a93260d360a5c7a1a1bd71786a97f030e35de59bb92a88976808498f",
+          "size": 377516376
+        },
+        "model-00005-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00005-of-00032.safetensors",
+          "sha256": "ccd22ff95a3d10ecb0e0b923c5d8cd47471e0bf380e68fa7c24bf2328b7b89f0",
+          "size": 377516376
+        },
+        "model-00006-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00006-of-00032.safetensors",
+          "sha256": "4b0201280c34b6d2602d2167a7661ae4f4d27725584bace09b88e035c5ce9b21",
+          "size": 377516560
+        },
+        "model-00007-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00007-of-00032.safetensors",
+          "sha256": "a61e330da0464fb2f50a1415e6352a0f679366d5fe58c8fb3b0c93ec6dcec04a",
+          "size": 377516616
+        },
+        "model-00008-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00008-of-00032.safetensors",
+          "sha256": "c4459b350bc325bcefc53a2096e80e8a834fd22d33e5540c61dfd2d7e6dcdb48",
+          "size": 664495552
+        },
+        "model-00009-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00009-of-00032.safetensors",
+          "sha256": "b98ac4cace09ec8b28f85ccb308f5a42cc954630eba774c38eded1d79860512e",
+          "size": 453019768
+        },
+        "model-00010-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00010-of-00032.safetensors",
+          "sha256": "6a4ddb41133474bc344fc0c4d80c6f762d9de196a51f882fb7079e6336e1b3ca",
+          "size": 453019768
+        },
+        "model-00011-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00011-of-00032.safetensors",
+          "sha256": "bd63440d9640fab5e2d8edda678c0086b459dd1705b3b534d1dfb448f95fff33",
+          "size": 453019768
+        },
+        "model-00012-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00012-of-00032.safetensors",
+          "sha256": "59586d8ac45397a511a0111255c95ff0473e8f6a0fe2d0528d547f943453d5f3",
+          "size": 453019768
+        },
+        "model-00013-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00013-of-00032.safetensors",
+          "sha256": "3fd40d58f7272b0a38dc098ed888921c26f4efefa9ecbcce967f253d2a514eda",
+          "size": 453019768
+        },
+        "model-00014-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00014-of-00032.safetensors",
+          "sha256": "df1f857798f12a2798b254a894d042c0d9e07516ec14ed6d5c95aa77c69a9db9",
+          "size": 453019984
+        },
+        "model-00015-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00015-of-00032.safetensors",
+          "sha256": "70214d7ffc0ed438ba4504a87dcb2399f081b5833bc75f1791d0a26e206e9b0b",
+          "size": 453020056
+        },
+        "model-00016-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00016-of-00032.safetensors",
+          "sha256": "ff24ebf8c9c2608e954f8a9c8558e4e0a2f9f18841e1be0ed73022d04f607740",
+          "size": 687686672
+        },
+        "model-00017-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00017-of-00032.safetensors",
+          "sha256": "631b6ffb07fe81a01aee5d9c4ba6cd88a0fc7ab48d1d763b74b6fc1abbb12e7e",
+          "size": 453019960
+        },
+        "model-00018-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00018-of-00032.safetensors",
+          "sha256": "e59906f46355f089081a99008ed5633710cc2ac19fda7cfda67a1211eb64509c",
+          "size": 453019960
+        },
+        "model-00019-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00019-of-00032.safetensors",
+          "sha256": "8181a52c54d0a4f49e24ceebf2a87856b23cdf01c2425f1ff1913edc04f6d87b",
+          "size": 453019960
+        },
+        "model-00020-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00020-of-00032.safetensors",
+          "sha256": "784e6251f7c9acaf0417b1081fe21c12cbea07003b42c95a5190b3e7ea34ca24",
+          "size": 453019960
+        },
+        "model-00021-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00021-of-00032.safetensors",
+          "sha256": "dedef14f97ba246fb1696167ec2db8f7a48a16b9f41314a3d8ec5b81b427ee1e",
+          "size": 453019960
+        },
+        "model-00022-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00022-of-00032.safetensors",
+          "sha256": "c12c6aaa5f6d18fa19509c14f15fd691b37a4b2256a7e8bc106947c50c331357",
+          "size": 453020176
+        },
+        "model-00023-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00023-of-00032.safetensors",
+          "sha256": "453ba0fac8d0bcc1cf29686f44bbc1d96ac637146cffbff8b4afdfe70caf8bd0",
+          "size": 453020248
+        },
+        "model-00024-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00024-of-00032.safetensors",
+          "sha256": "242ab0ba19233eb65e5d2cbeb8d577cbceeadc01ffa98beb85d8d4b855f06b56",
+          "size": 1147368624
+        },
+        "model-00025-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00025-of-00032.safetensors",
+          "sha256": "b64ad179cd994e1c1a6e1f638ba05d1b1d8af0619f2f70dc6af792437823cd61",
+          "size": 453019960
+        },
+        "model-00026-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00026-of-00032.safetensors",
+          "sha256": "208264e994d79a7c016f342c57ad7bd737d7b1ddd48ad5ef107d9f8b87eee6c2",
+          "size": 453019960
+        },
+        "model-00027-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00027-of-00032.safetensors",
+          "sha256": "c332b5b2190d21411d3864de489dc192c42f1a48869b969c09ccf7a0dc46c75d",
+          "size": 453019960
+        },
+        "model-00028-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00028-of-00032.safetensors",
+          "sha256": "292bbc8a22035864018762a389f36d33495737b4530aef69db414809e56964f6",
+          "size": 453019960
+        },
+        "model-00029-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00029-of-00032.safetensors",
+          "sha256": "c561e7d76d9bc6422109c47aadc0c73bbb5c2b8b498f6accd7921be7c9ce90b1",
+          "size": 453019960
+        },
+        "model-00030-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00030-of-00032.safetensors",
+          "sha256": "9aaf7272165764d0895d2c85e8ad26aff0b26ee155129ccfef0acdbd22908ce7",
+          "size": 453020176
+        },
+        "model-00031-of-00032.safetensors": {
+          "path": "/work/AI/checkpoints/Ling-3.0-tiny/model-00031-of-00032.safetensors",
+          "sha256": "411913f6502724d0cb94783aec90e0e3788fbd5be8195573a2769be8c41285f4",
+          "size": 453020248
+        }
+      }
+    },
+    "executable": {
+      "path": "/work/AI/experiments/ling-strata-20261016/build/strata_ling_bf16",
+      "sha256": "538aa3552812d0e3dcf1cd1b1ea26360bd73076f0e24185201759db2bce51f58",
+      "size": 3631232
+    },
+    "manifest": {
+      "path": "/work/AI/experiments/ling-strata-20261016/admission/manifest.tsv",
+      "sha256": "427683d44ccd97ea84e48925b18c114993eb2ce68ee49d78e29a02f77898b229",
+      "size": 1127739
+    },
+    "native_outputs": {
+      "execution.json": {
+        "sha256": "a616a05757b2f2e6e25dbc275bfcf48ec4fb395aed11b5cf0a903a286b5d89dd",
+        "size": 696
+      },
+      "final-hidden.f32": {
+        "sha256": "8df60c907a4c6ce5f0fceecbdc59cff3dc263cea451dcf6a150ef0ed9609ef1b",
+        "size": 24576
+      },
+      "layer-0.f32": {
+        "sha256": "d6b30d41fc17ae5c60d0f160dccbeffbbf5f05dc975aff539fbdf5de129bdba0",
+        "size": 24576
+      },
+      "layer-1.f32": {
+        "sha256": "50f5a42dcc712ab722771a7795ba3301e95ce01c4f72e53a3d8da49ddcc6d3ff",
+        "size": 24576
+      },
+      "layer-10.f32": {
+        "sha256": "3855a62d6a5d31bb41c4a440fe10a8c74bc200231f461059f405b63b9484acdd",
+        "size": 24576
+      },
+      "layer-11.f32": {
+        "sha256": "4c4408e0fa94c04902d9dcbe0c78097cb86571cd12b0644baaa76f2c318ab090",
+        "size": 24576
+      },
+      "layer-12.f32": {
+        "sha256": "df47e1968ad701c81fc4539c1b19f1c05881e58d48bb4f6e8dc671ef1036354f",
+        "size": 24576
+      },
+      "layer-13.f32": {
+        "sha256": "2877d97eabbf37e0bf8edc5ea6eeb24321604f8a030163f4f033d01c81e0bdf0",
+        "size": 24576
+      },
+      "layer-14.f32": {
+        "sha256": "d4e053451af6249893a3b86be1bba7226d26b33ef7a8919b3c4c98c74b2f1d96",
+        "size": 24576
+      },
+      "layer-15.f32": {
+        "sha256": "a254af26c02d77fc6e4724259e783f62330d67508394cc5bbe43f1c8296f8388",
+        "size": 24576
+      },
+      "layer-16.f32": {
+        "sha256": "b24c64c504cf6b6a6fd0b3cf632b35cf74ad274b56b8fe4eb13e1b096dd33e1e",
+        "size": 24576
+      },
+      "layer-17.f32": {
+        "sha256": "24838beec8ca662d68479abdbde162d1807ec19eb1e51dc049988e8b79bad917",
+        "size": 24576
+      },
+      "layer-18.f32": {
+        "sha256": "93fea2a353a6595479594469541635118b94c74935ea6a84a1c12e834c388958",
+        "size": 24576
+      },
+      "layer-19.f32": {
+        "sha256": "c361e3fbdb97e77c391f33e355859518ae9594b4fcdd7def168cf2d17723f0d9",
+        "size": 24576
+      },
+      "layer-2.f32": {
+        "sha256": "b239d0e5ffd1a18554a1bc66f241ccb2907bb51d7228d889bb9cb2f2eacf92c9",
+        "size": 24576
+      },
+      "layer-20.f32": {
+        "sha256": "f1736365c823fe7482db5ae8353c26637a694eac9f12f90478ebe998f57f9738",
+        "size": 24576
+      },
+      "layer-21.f32": {
+        "sha256": "6813ff1d0fa683eb91d701fa0d706d1e1d91f7b836240eca58f04fa0c8cf863d",
+        "size": 24576
+      },
+      "layer-22.f32": {
+        "sha256": "136b9a0ba10147995caf2e76c07f5c6098451d5cc3517e7577cab68f0863ceb8",
+        "size": 24576
+      },
+      "layer-23.f32": {
+        "sha256": "18c8eb48c1c5ec74472c21c826989f8cf2b4baffd56840b483dcf9fe30375fc1",
+        "size": 24576
+      },
+      "layer-3.f32": {
+        "sha256": "76d99091652a46952859ba9a1300a33c44d3499d4c42331d76cb993fb06b256f",
+        "size": 24576
+      },
+      "layer-4.f32": {
+        "sha256": "552a73572a6f4fd8dba370fdc6e8323876c8c92a3fbf3a083aef50c6f1b69832",
+        "size": 24576
+      },
+      "layer-5.f32": {
+        "sha256": "92ff3550a26adc54c13c35b2f842f6c50084a0c32e739399820ff1bb11f6ee78",
+        "size": 24576
+      },
+      "layer-6.f32": {
+        "sha256": "a457a300757769a145aba18ec76141b5b8e2c77729a2e43cc242917333562aa0",
+        "size": 24576
+      },
+      "layer-7.f32": {
+        "sha256": "ae7fd53ba388554aa02560fc114865c45bf163860877e6720e642fcebd09823b",
+        "size": 24576
+      },
+      "layer-8.f32": {
+        "sha256": "1b9a162eb790ea2f60075780dcef3da15ab17ec72e309e8c70d27cc80d78bf58",
+        "size": 24576
+      },
+      "layer-9.f32": {
+        "sha256": "e3d199ca70ff0366e19d6d8392bcbf09f4ada8adcbc99db41448ce64f52712fb",
+        "size": 24576
+      },
+      "logits.f32": {
+        "sha256": "eed23a5c443effbbd914f882b97260aba0ae78cd16224d588e0301d591b46c98",
+        "size": 2514944
+      },
+      "routes.tsv": {
+        "sha256": "8037ef089824b1732435cabadee5f279526f7e958ed78ffef78e5136d68091fb",
+        "size": 11540
+      }
+    },
+    "original_source": {
+      "configuration_bailing_moe_v3.py": {
+        "path": "/work/AI/checkpoints/Ling-3.0-tiny/configuration_bailing_moe_v3.py",
+        "sha256": "f2c048966aec8a2f042cfeb1351f74d51a28589b409c55baae7d24e841c1f6c4",
+        "size": 4725
+      },
+      "modeling_bailing_moe_v3.py": {
+        "path": "/work/AI/checkpoints/Ling-3.0-tiny/modeling_bailing_moe_v3.py",
+        "sha256": "c2509bf7ac580c262e2581d34d6403aa21682d2e10beb9ad85ad8820a7e33a40",
+        "size": 73194
+      }
+    },
+    "relevant_source": {
+      "include/strata/kernels/bf16_bits.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/kernels/bf16_bits.hpp",
+        "sha256": "813b51f17c5c264d642f4d77b3d6e5f35e7ea7310ba87b18b3a2a5bc9185198f",
+        "size": 2660
+      },
+      "include/strata/kernels/bf16_gemv.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/kernels/bf16_gemv.hpp",
+        "sha256": "97e5fac5c5b8dbd86b4e104bf4b69155424bc6d28d0a991240bd9912349f6e6f",
+        "size": 4460
+      },
+      "include/strata/kernels/pdl.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/kernels/pdl.hpp",
+        "sha256": "fd3e1d2122aa3c8dbd2abd45089139e8f22852664c75b694acf7f96903d07c08",
+        "size": 5271
+      },
+      "include/strata/ling/kda.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ling/kda.hpp",
+        "sha256": "5bb62f2b3d30fbb1d98444171759d2edda869e2a24bb03b8ba19fb24ee00fef5",
+        "size": 2788
+      },
+      "include/strata/ling/mla.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ling/mla.hpp",
+        "sha256": "0083888e83218e85a04d7018fa8082faec4f9df96158e20c0625850c54a98d72",
+        "size": 1174
+      },
+      "include/strata/ring/attention.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/attention.hpp",
+        "sha256": "b1514a02fa45d07bcb077170b502b8f7efe6207785b75f65f6df23112e53e0fe",
+        "size": 2268
+      },
+      "include/strata/ring/expert_cache.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/expert_cache.hpp",
+        "sha256": "c67b93090d9326a5409f3ee30a8f2cac268cccb7d5cf884fd1bee5d98f2b6735",
+        "size": 3138
+      },
+      "include/strata/ring/generation.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/generation.hpp",
+        "sha256": "bfff1faedbdb4e7079764137daa2ff765c24441689922286103ad00ca5cd6256",
+        "size": 4286
+      },
+      "include/strata/ring/numerics.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/numerics.hpp",
+        "sha256": "a908ea6947bc38a043f58e7c2f1fa58b26ee75d6508ce4797013bdbf3a74fd2b",
+        "size": 2528
+      },
+      "include/strata/ring/routing.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/routing.hpp",
+        "sha256": "bd4dad6941029ebef5e70363273239f8c161e41675a22bd3191b6de0f698c2ea",
+        "size": 864
+      },
+      "include/strata/ring/tensor_store.hpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/include/strata/ring/tensor_store.hpp",
+        "sha256": "6591dae3924efab194887311f4df51f7efa630a764a7855249f8d4637723e7c9",
+        "size": 768
+      },
+      "src/kernels/cuda/native_bf16.cu": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/kernels/cuda/native_bf16.cu",
+        "sha256": "ddb35a48c6372a85a5b2dff3ca56dd1fc9a76e800beb2f897d0c2c96d2b63093",
+        "size": 19601
+      },
+      "src/kernels/cuda/s26_tsum.cuh": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/kernels/cuda/s26_tsum.cuh",
+        "sha256": "9d48c241a67096c4d57d10e0a0e7f8f20197ac91754c32889527c0550ce0a695",
+        "size": 3159
+      },
+      "src/ling/engine.cu": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ling/engine.cu",
+        "sha256": "c6f1368a0a401c686cc18fee1f6cb649b98bb31079cd714d2b4e6d9161f47e9c",
+        "size": 16967
+      },
+      "src/ling/kda.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ling/kda.cpp",
+        "sha256": "a49f2cb40c60961d6dded0b88a687b6c49d7e05813f643f2955246410f277b34",
+        "size": 13094
+      },
+      "src/ling/mla.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ling/mla.cpp",
+        "sha256": "60221220c7794e5aac118e367da94bc8544054479b45f5e35f5c67ab491d5032",
+        "size": 4132
+      },
+      "src/ring/attention.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ring/attention.cpp",
+        "sha256": "50eddbf8b2e2d0780773ad86d5e07935442e379259a51f8da451760a72dc5245",
+        "size": 10518
+      },
+      "src/ring/engine.cu": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ring/engine.cu",
+        "sha256": "9bc003db1e9ef88d963bb2531e2dc548bf8d251d208667e6f168f23a1bf52eaf",
+        "size": 17007
+      },
+      "src/ring/expert_cache.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ring/expert_cache.cpp",
+        "sha256": "6c687739b6410e90d70571efa98a26d412943bb81a1065eb9dd1f55b0a6e5efa",
+        "size": 6608
+      },
+      "src/ring/routing.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ring/routing.cpp",
+        "sha256": "7c65aa4daded52666648ac96eb285c08825f0f066d8bfc6dc43ef4af39c2a4af",
+        "size": 3594
+      },
+      "src/ring/tensor_store.cpp": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/src/ring/tensor_store.cpp",
+        "sha256": "53c91ca9590f865bdc06fa64d8365c815dc9826bd87628c8d5a54690752457b4",
+        "size": 5451
+      },
+      "tools/ling_ring_bf16/ling/CMakeLists.txt": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/ling/CMakeLists.txt",
+        "sha256": "7ac2b696674aa3665839c3c6856a79177b629bbdb90a95af047666ecf9a105c9",
+        "size": 1480
+      },
+      "tools/ling_ring_bf16/prepare_ling_manifest.py": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/prepare_ling_manifest.py",
+        "sha256": "5be963711237ed4b5d81f0ada6bf9b40f060c81a40df658b12fd0caee3c8f963",
+        "size": 10860
+      },
+      "tools/ling_ring_bf16/run_ling_verified.py": {
+        "path": "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ling_verified.py",
+        "sha256": "968ae864dbea0ed7a1a1c6eda0e9f1392e12845f736ddfa3b97d02fe05cfe779",
+        "size": 15150
+      }
+    }
+  },
+  "qualified_at": "2026-10-16",
+  "reference_environment": {
+    "cuda": "13.0",
+    "dependency_boundary": "Ling original reference uses Transformers 4.55.4/fla-core 0.5.0; Ring reference uses Transformers 4.52.3",
+    "fla_core": "0.5.0",
+    "python": "3.14.4",
+    "tf32": false,
+    "torch": "2.14.1+cu130",
+    "transformers": "4.55.4"
+  },
+  "schema": "strata-ling-qualification-v1",
+  "scope": "Original BF16/F32 metadata, FP32 working state, no quantization; bounded native/original comparison only",
+  "services": {
+    "after": {
+      "70214": "17015127",
+      "70369": "17016185"
+    },
+    "before": {
+      "70214": "17015127",
+      "70369": "17016185"
+    },
+    "unchanged": true
+  },
+  "status": "partial_bounded_gpu_evidence"
+}

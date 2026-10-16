@@ -1,0 +1,337 @@
+// AI Identity Incorported <james@aiii.id>
+// Opt-in Ling BF16 reference executor. Original weights, FP32 working state.
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <csignal>
+#include <cstring>
+#include <cuda_runtime.h>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <strata/kernels/bf16_gemv.hpp>
+#include <strata/ling/kda.hpp>
+#include <strata/ling/mla.hpp>
+#include <strata/ring/expert_cache.hpp>
+#include <strata/ring/generation.hpp>
+#include <strata/ring/numerics.hpp>
+#include <strata/ring/routing.hpp>
+#include <strata/ring/tensor_store.hpp>
+#include <vector>
+
+namespace sr = strata::ring;
+static volatile std::sig_atomic_t cancelled = 0;
+static void cancel_handler(int) { cancelled = 1; }
+static void check_cancelled() {
+  if (cancelled)
+    throw std::runtime_error("execution cancelled; no successful receipt");
+}
+static void check(cudaError_t e) {
+  if (e != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(e));
+}
+static float bf16(uint16_t b) {
+  uint32_t u = uint32_t(b) << 16;
+  float f;
+  std::memcpy(&f, &u, 4);
+  return f;
+}
+static std::vector<float> floats(const sr::TensorView &t) {
+  const size_t n = t.bytes / (t.dtype == "BF16" ? 2 : 4);
+  std::vector<float> v(n);
+  if (t.dtype == "BF16") {
+    for (size_t i = 0; i < n; ++i) {
+      uint16_t b;
+      std::memcpy(&b, t.data + 2 * i, 2);
+      v[i] = bf16(b);
+    }
+  } else if (t.dtype == "F32")
+    std::memcpy(v.data(), t.data, t.bytes);
+  else
+    throw std::runtime_error("unsupported tensor precision");
+  return v;
+}
+static void shape(const sr::TensorView &t, std::initializer_list<size_t> dims) {
+  if (t.shape != std::vector<size_t>(dims))
+    throw std::runtime_error("tensor geometry mismatch");
+}
+static void finite(const std::vector<float> &x) {
+  for (float f : x)
+    if (!std::isfinite(f))
+      throw std::runtime_error("nonfinite forward state");
+}
+static std::vector<float> norm(const std::vector<float> &x,
+                               const sr::TensorView &weight) {
+  shape(weight, {x.size()});
+  return sr::rms_norm(x, floats(weight));
+}
+static void add(std::vector<float> &x, const std::vector<float> &y) {
+  if (x.size() != y.size())
+    throw std::runtime_error("residual shape mismatch");
+  for (size_t i = 0; i < x.size(); ++i)
+    x[i] += y[i];
+  finite(x);
+}
+struct DeviceBuffer {
+  void *p{};
+  size_t bytes{};
+  explicit DeviceBuffer(size_t n) : bytes(n) { check(cudaMalloc(&p, n)); }
+  DeviceBuffer(const DeviceBuffer &) = delete;
+  ~DeviceBuffer() {
+    if (p)
+      cudaFree(p);
+  }
+};
+struct ExpertDevice final : sr::ExpertCache::BackendValue {
+  DeviceBuffer weights;
+  explicit ExpertDevice(size_t bytes) : weights(bytes) {}
+};
+struct CudaBackend final : sr::ExpertCache::Backend {
+  sr::ExpertCache::BackendValuePtr upload(const sr::ExpertKey &,
+                                          const sr::ExpertPayload &p,
+                                          std::string &e) override {
+    try {
+      auto v = std::make_shared<ExpertDevice>(p.bytes());
+      size_t at = 0;
+      for (auto *b : {&p.gate, &p.up, &p.down}) {
+        check(cudaMemcpy(static_cast<uint8_t *>(v->weights.p) + at, b->data(),
+                         b->size(), cudaMemcpyHostToDevice));
+        at += b->size();
+      }
+      return v;
+    } catch (const std::exception &ex) {
+      e = ex.what();
+      return {};
+    }
+  }
+};
+class Matvec {
+  // Largest matrix is the unmodified BF16 output head.
+  DeviceBuffer weight{size_t(157184) * 1536 * 2}, x{4608 * 4}, y{157184 * 4};
+
+public:
+  static constexpr size_t workspace_bytes =
+      size_t(157184) * 1536 * 2 + 4608 * 4 + 157184 * 4;
+  std::vector<float> apply_device(const uint16_t *w, size_t rows, size_t cols,
+                                  const std::vector<float> &input) {
+    if (input.size() != cols || cols > 4608 || rows > 157184 || cols % 2)
+      throw std::runtime_error("matvec geometry");
+    check(cudaMemcpy(x.p, input.data(), cols * 4, cudaMemcpyHostToDevice));
+    strata::kernels::bf16_gemv_fp32_mmvf(static_cast<float *>(x.p), w,
+                                         static_cast<float *>(y.p), cols, rows,
+                                         nullptr);
+    check(cudaGetLastError());
+    std::vector<float> output(rows);
+    check(cudaMemcpy(output.data(), y.p, rows * 4, cudaMemcpyDeviceToHost));
+    finite(output);
+    return output;
+  }
+  std::vector<float> apply(const sr::TensorView &t,
+                           const std::vector<float> &input) {
+    if (t.shape.size() != 2 || t.shape[1] != input.size() ||
+        t.dtype != "BF16" || t.bytes > weight.bytes)
+      throw std::runtime_error("expected compatible original BF16 matrix");
+    check(cudaMemcpy(weight.p, t.data, t.bytes, cudaMemcpyHostToDevice));
+    return apply_device(static_cast<uint16_t *>(weight.p), t.shape[0],
+                        t.shape[1], input);
+  }
+};
+static std::vector<float> swiglu(std::vector<float> g,
+                                 const std::vector<float> &u) {
+  if (g.size() != u.size())
+    throw std::runtime_error("SwiGLU geometry");
+  for (size_t i = 0; i < g.size(); ++i)
+    g[i] = (g[i] / (1 + std::exp(-g[i]))) * u[i];
+  finite(g);
+  return g;
+}
+static std::vector<float> mlp(Matvec &mv, const sr::TensorStore &store,
+                              const std::string &prefix,
+                              const std::vector<float> &x) {
+  auto g = mv.apply(store.tensor(prefix + "gate_proj.weight"), x);
+  auto u = mv.apply(store.tensor(prefix + "up_proj.weight"), x);
+  return mv.apply(store.tensor(prefix + "down_proj.weight"),
+                  swiglu(std::move(g), u));
+}
+static void write_row(const std::filesystem::path &p,
+                      const std::vector<float> &x) {
+  std::ofstream out(p, std::ios::binary | std::ios::app);
+  if (!out.write(reinterpret_cast<const char *>(x.data()), x.size() * 4))
+    throw std::runtime_error("output write failed");
+}
+
+namespace sl = strata::ling;
+static float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
+struct KdaLayer {
+  sl::KdaConfig config;
+  sl::KdaState state{config};
+  std::vector<float> qc, kc, vc, alog, dt, output_norm;
+  KdaLayer(const sr::TensorStore &store, const std::string &pre) {
+    qc = floats(store.tensor(pre + "q_conv1d.weight"));
+    kc = floats(store.tensor(pre + "k_conv1d.weight"));
+    vc = floats(store.tensor(pre + "v_conv1d.weight"));
+    alog = floats(store.tensor(pre + "A_log"));
+    dt = floats(store.tensor(pre + "dt_bias"));
+    output_norm = floats(store.tensor(pre + "o_norm.weight"));
+    if (qc.size()!=8192 || kc.size()!=8192 || vc.size()!=8192 ||
+        alog.size()!=16 || dt.size()!=2048 || output_norm.size()!=128)
+      throw std::runtime_error("KDA metadata geometry");
+    for (auto *v : {&qc,&kc,&vc,&alog,&dt,&output_norm}) finite(*v);
+  }
+  std::vector<float> step(Matvec &mv, const sr::TensorStore &store,
+                          const std::string &pre, const std::vector<float> &x) {
+    auto q=mv.apply(store.tensor(pre+"q_proj.weight"),x);
+    auto k=mv.apply(store.tensor(pre+"k_proj.weight"),x);
+    auto v=mv.apply(store.tensor(pre+"v_proj.weight"),x);
+    auto g=mv.apply(store.tensor(pre+"f_proj.weight"),x);
+    auto beta=mv.apply(store.tensor(pre+"b_proj.weight"),x);
+    if(q.size()!=2048 || k.size()!=2048 || v.size()!=2048 || g.size()!=2048 || beta.size()!=16)
+      throw std::runtime_error("KDA projection geometry");
+    for(auto &f:beta) f=sigmoid(f);
+    sl::KdaWeights weights{qc.data(),kc.data(),vc.data(),nullptr,nullptr,nullptr,alog.data(),dt.data()};
+    std::vector<float> o(2048);
+    std::string error;
+    if(!sl::kda_forward(config,q.data(),k.data(),v.data(),g.data(),beta.data(),1,weights,state,o.data(),error))
+      throw std::runtime_error(error);
+    auto gate=mv.apply(store.tensor(pre+"g_proj.weight"),x);
+    if(gate.size()!=2048) throw std::runtime_error("KDA output gate geometry");
+    for(size_t head=0;head<16;++head) {
+      std::vector<float> part(o.begin()+head*128,o.begin()+(head+1)*128);
+      part=sr::rms_norm(part,output_norm);
+      for(size_t i=0;i<128;++i) o[head*128+i]=part[i]*sigmoid(gate[head*128+i]);
+    }
+    return mv.apply(store.tensor(pre+"o_proj.weight"),o);
+  }
+};
+static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
+                                  const std::string &pre, const std::vector<float> &x,
+                                  sl::MlaCache &cache, size_t position) {
+  auto qa=mv.apply(store.tensor(pre+"q_a_proj.weight"),x);
+  qa=norm(qa,store.tensor(pre+"q_a_layernorm.weight"));
+  auto q=mv.apply(store.tensor(pre+"q_b_proj.weight"),qa);
+  auto compressed=mv.apply(store.tensor(pre+"kv_a_proj_with_mqa.weight"),x);
+  if(compressed.size()!=576) throw std::runtime_error("MLA compressed KV geometry");
+  std::vector<float> low(compressed.begin(),compressed.begin()+512);
+  std::vector<float> rope(compressed.begin()+512,compressed.end());
+  low=norm(low,store.tensor(pre+"kv_a_layernorm.weight"));
+  auto expanded=mv.apply(store.tensor(pre+"kv_b_proj.weight"),low);
+  if(expanded.size()!=4096) throw std::runtime_error("MLA expanded KV geometry");
+  std::vector<float> key(2048),value(2048);
+  for(size_t h=0;h<16;++h) for(size_t i=0;i<128;++i) {
+    key[h*128+i]=expanded[h*256+i]; value[h*128+i]=expanded[h*256+128+i];
+  }
+  auto gates=mv.apply(store.tensor(pre+"g_proj.weight"),x);
+  auto context=cache.step(q,key,rope,value,gates,position);
+  return mv.apply(store.tensor(pre+"dense.weight"),context);
+}
+int main(int argc,char **argv) {
+  try {
+    if(argc!=7) throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID");
+    const std::filesystem::path output=argv[4];
+    if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
+    const auto tokens=sr::vocabulary_ids(argv[3],157184);
+    if(tokens.empty() || tokens.size()>1024) throw std::runtime_error("token count must be 1..1024");
+    const size_t cache_mib=sr::unsigned_decimal(argv[5]);
+    if(cache_mib<5 || cache_mib>2048) throw std::runtime_error("cache budget must be 5..2048 MiB");
+    const std::string identity=argv[6];
+    if(identity.size()!=64 || identity.find_first_not_of("0123456789abcdef")!=std::string::npos)
+      throw std::runtime_error("checkpoint identity must be a SHA-256 hex digest");
+    std::signal(SIGINT,cancel_handler); std::signal(SIGTERM,cancel_handler);
+    sr::TensorStore store(argv[1],argv[2]);
+    const auto &embedding=store.tensor("model.word_embeddings.weight");
+    shape(embedding,{157184,1536});
+    if(embedding.dtype!="BF16") throw std::runtime_error("original BF16 embedding required");
+    check(cudaSetDevice(0));
+    cudaDeviceProp props{}; check(cudaGetDeviceProperties(&props,0));
+    if(props.major!=8 || props.minor!=9) throw std::runtime_error("this target is qualified only for sm_89");
+    size_t free=0,total=0; check(cudaMemGetInfo(&free,&total));
+    const size_t budget=cache_mib*1024*1024;
+    if(free<budget+Matvec::workspace_bytes+size_t(512)*1024*1024)
+      throw std::runtime_error("insufficient free GPU memory; no process will be stopped");
+    Matvec mv;
+    auto backend=std::make_shared<CudaBackend>();
+    sr::ExpertCache cache({budget,24,128},backend);
+    sr::ExpertCache::Provider provider=[&](const sr::ExpertKey &key,sr::ExpertPayload &p,std::string &error) {
+      try {
+        const std::string prefix="model.layers."+std::to_string(key.layer)+".mlp.experts."+std::to_string(key.expert)+".";
+        const auto &g=store.tensor(prefix+"gate_proj.weight");
+        const auto &u=store.tensor(prefix+"up_proj.weight");
+        const auto &d=store.tensor(prefix+"down_proj.weight");
+        shape(g,{512,1536}); shape(u,{512,1536}); shape(d,{1536,512});
+        if(g.dtype!="BF16" || u.dtype!="BF16" || d.dtype!="BF16") throw std::runtime_error("expert is not BF16");
+        p.gate_shape=p.up_shape={512,1536}; p.down_shape={1536,512};
+        p.gate.assign(g.data,g.data+g.bytes);p.up.assign(u.data,u.data+u.bytes);p.down.assign(d.data,d.data+d.bytes);
+        return true;
+      } catch(const std::exception &e) {error=e.what();return false;}
+    };
+    std::vector<std::unique_ptr<KdaLayer>> kda(24);
+    std::vector<std::unique_ptr<sl::MlaCache>> mla(24);
+    for(size_t l=0;l<24;++l) {
+      if(l%4==3) mla[l]=std::make_unique<sl::MlaCache>(sl::MlaConfig{},tokens.size());
+      else kda[l]=std::make_unique<KdaLayer>(store,"model.layers."+std::to_string(l)+".attention.");
+    }
+    const sr::RouterConfig routing{128,8,4,8,2.5f};
+    std::filesystem::create_directories(output);
+    std::ofstream routes(output/"routes.tsv"); routes<<std::setprecision(9);
+    const auto start=std::chrono::steady_clock::now();
+    for(size_t pos=0;pos<tokens.size();++pos) {
+      check_cancelled(); std::vector<float> h(1536);
+      for(size_t i=0;i<h.size();++i) {
+        uint16_t b; std::memcpy(&b,embedding.data+(size_t(tokens[pos])*1536+i)*2,2);h[i]=bf16(b);
+      }
+      for(size_t layer=0;layer<24;++layer) {
+        check_cancelled(); const std::string pre="model.layers."+std::to_string(layer)+".";
+        auto a=norm(h,store.tensor(pre+"input_layernorm.weight"));
+        if(kda[layer]) add(h,kda[layer]->step(mv,store,pre+"attention.",a));
+        else add(h,mla_step(mv,store,pre+"attention.",a,*mla[layer],pos));
+        auto x=norm(h,store.tensor(pre+"post_attention_layernorm.weight"));
+        if(layer==0) add(h,mlp(mv,store,pre+"mlp.",x));
+        else {
+          auto logits=mv.apply(store.tensor(pre+"mlp.gate.weight"),x);
+          auto bias=floats(store.tensor(pre+"mlp.gate.expert_bias"));
+          if(logits.size()!=128 || bias.size()!=128) throw std::runtime_error("router geometry");
+          auto selected=sr::route(logits.data(),bias.data(),128,routing);
+          std::vector<float> mixed(1536,0); routes<<pos<<'\t'<<layer;
+          for(size_t j=0;j<8;++j) {
+            auto expert=selected.expert_ids[j];routes<<'\t'<<expert<<':'<<selected.weights[j];
+            std::string error; auto lease=cache.acquire({identity,uint32_t(layer),uint32_t(expert)},provider,error);
+            if(!lease) throw std::runtime_error(error);
+            auto device=std::dynamic_pointer_cast<const ExpertDevice>(lease->backend_value());
+            if(!device) throw std::runtime_error("wrong backend payload");
+            const auto *w=static_cast<const uint16_t *>(device->weights.p);
+            constexpr size_t count=512*1536;
+            auto g=mv.apply_device(w,512,1536,x);auto u=mv.apply_device(w+count,512,1536,x);
+            auto y=mv.apply_device(w+2*count,1536,512,swiglu(std::move(g),u));
+            for(size_t d=0;d<mixed.size();++d) mixed[d]+=y[d]*selected.weights[j];
+          }
+          routes<<'\n';add(mixed,mlp(mv,store,pre+"mlp.shared_experts.",x));add(h,mixed);
+        }
+        write_row(output/("layer-"+std::to_string(layer)+".f32"),h);
+      }
+      h=norm(h,store.tensor("model.norm.weight"));write_row(output/"final-hidden.f32",h);
+      auto logits=mv.apply(store.tensor("lm_head.weight"),h);write_row(output/"logits.f32",logits);
+      std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
+    }
+    check_cancelled(); auto stats=cache.stats(); routes.flush();
+    if(!routes) throw std::runtime_error("route trace write failed");
+    std::ostringstream token_json;token_json<<'[';
+    for(size_t i=0;i<tokens.size();++i){if(i) token_json<<',';token_json<<tokens[i];}token_json<<']';
+    std::ostringstream receipt;receipt<<std::setprecision(12)
+      <<"{\"status\":\"executed\",\"model\":\"Ling-3.0-tiny\",\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
+      <<tokens.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<tokens.size()
+      <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"cache_budget_bytes\":"<<budget
+      <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
+      <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""
+      <<",\"host_attention_state_bytes\":"<<(size_t(6)*tokens.size()*16*(192+128)+size_t(18)*(16*128*128+3*2048*4))*sizeof(float)
+      <<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
+      <<",\"workspace_bytes\":"<<Matvec::workspace_bytes<<",\"wall_seconds\":"
+      <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"}\n";
+    std::ofstream out(output/"execution.json");out<<receipt.str();out.flush();
+    if(!out) throw std::runtime_error("execution receipt write failed");
+    std::cout<<receipt.str();return 0;
+  } catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
+}

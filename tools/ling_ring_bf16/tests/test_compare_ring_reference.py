@@ -22,17 +22,46 @@ def make(tmp, corrupt=None):
     for name in ("hidden_layers.fp32","final_hidden.fp32","logits.fp32","layers.json","router_meta.json"):
         ref_outputs[name]={"sha256":hashlib.sha256((ref/name).read_bytes()).hexdigest()}
     pins={"config":{"sha256":"c"*64,"size":1},"index":{"sha256":"d"*64,"size":1},"shards":{"shard.safetensors":{"sha256":"e"*64,"size":1}}}
-    (ref/"report.json").write_text(json.dumps({"status":"executed","hidden_layers_shape":[L,T,H],"tokens":[1,2,3],"config":{"vocab_size":V,"first_k_dense_replace":1},"checkpoint":pins,"source":{"sha256":"f"*64},"outputs":ref_outputs}))
+    (ref/"report.json").write_text(json.dumps({"status":"executed","hidden_layers_shape":[L,T,H],"tokens":[1,2,3],"config":{"vocab_size":V,"first_k_dense_replace":1},"checkpoint":pins,"source":{"sha256":"f"*64,"configuration_sha256":"1"*64},"outputs":ref_outputs}))
     (cand/"execution.json").write_text(json.dumps({"status":"executed","model":"Ring-mini-2.0","activation_dtype":"FP32","quantized":False,"tokens":T,"token_ids":[1,2,3],"layers":L,"checkpoint_id":"a"*64}))
     native={}
     for name in ("routes.tsv","final-hidden.f32","logits.f32","execution.json",*list(f"layer-{i}.f32" for i in range(L))):
         native[name]={"sha256":hashlib.sha256((cand/name).read_bytes()).hexdigest(),"size":(cand/name).stat().st_size}
-    source_pin={"sha256":"f"*64,"size":1}
-    (cand/"provenance.json").write_text(json.dumps({"schema":"strata-ring-verified-run-v1","status":"verified","checkpoint_id":"a"*64,"manifest":{"sha256":"a"*64,"size":1},"executable":{"sha256":"1"*64,"size":1},"checkpoint":pins,"original_source":{"modeling_bailing_moe_v2.py":source_pin},"relevant_source":{"src/ring/engine.cu":source_pin},"execution":json.loads((cand/"execution.json").read_text()),"native_outputs":native}))
+    source_pin={"sha256":"f"*64,"size":1}; configuration_pin={"sha256":"1"*64,"size":1}
+    (cand/"provenance.json").write_text(json.dumps({"schema":"strata-ring-verified-run-v1","status":"verified","checkpoint_id":"a"*64,"manifest":{"sha256":"a"*64,"size":1},"executable":{"sha256":"1"*64,"size":1},"checkpoint":pins,"original_source":{"modeling_bailing_moe_v2.py":source_pin,"configuration_bailing_moe_v2.py":configuration_pin},"relevant_source":{"src/ring/engine.cu":source_pin},"execution":json.loads((cand/"execution.json").read_text()),"native_outputs":native}))
     if corrupt: corrupt(ref,cand)
     return ref,cand
 def test_pass(tmp_path):
     r,c=make(tmp_path); assert compare(r,c,tmp_path/"out")["passed"]
+
+def test_reference_three_dimensional_logits_shape(tmp_path):
+    r,c=make(tmp_path)
+    report=json.loads((r/"report.json").read_text()); report["logits_shape"]=[1,3,7]; (r/"report.json").write_text(json.dumps(report))
+    assert compare(r,c,tmp_path/"out")["passed"]
+
+def test_current_nested_modeling_source_pin(tmp_path):
+    r,c=make(tmp_path)
+    report=json.loads((r/"report.json").read_text()); report["source"]={"modeling":{"sha256":"f"*64,"size":1},"configuration":{"sha256":"1"*64,"size":1}}; (r/"report.json").write_text(json.dumps(report))
+    assert compare(r,c,tmp_path/"out")["passed"]
+
+def test_configuration_source_mismatch_fails(tmp_path):
+    r,c=make(tmp_path)
+    provenance=json.loads((c/"provenance.json").read_text())
+    provenance["original_source"]["configuration_bailing_moe_v2.py"]["sha256"]="2"*64
+    (c/"provenance.json").write_text(json.dumps(provenance))
+    with pytest.raises(ValueError, match="configuration source"):
+        compare(r,c,tmp_path/"out")
+
+def test_generation_trace_is_exact(tmp_path):
+    r,c=make(tmp_path)
+    trace={"prompt_token_ids":[1,2],"generated_token_ids":[6,6],"eos_token_ids":[9],"max_new_tokens":2,"finish_reason":"length"}
+    (c/"generation.json").write_text(json.dumps(trace))
+    report=json.loads((r/"report.json").read_text()); report["tokens"]=[1,2,6]; (r/"report.json").write_text(json.dumps(report))
+    execution=json.loads((c/"execution.json").read_text()); execution["token_ids"]=[1,2,6]; execution["logits_mode"]="all"; execution["logits_tokens"]=3; (c/"execution.json").write_text(json.dumps(execution))
+    p=json.loads((c/"provenance.json").read_text()); p["execution"]=execution; p["native_outputs"]["execution.json"]={"sha256":hashlib.sha256((c/"execution.json").read_bytes()).hexdigest(),"size":(c/"execution.json").stat().st_size}; p["native_outputs"]["generation.json"]={"sha256":hashlib.sha256((c/"generation.json").read_bytes()).hexdigest(),"size":(c/"generation.json").stat().st_size}; p["frontend"]={name:{"sha256":"1"*64,"size":1} for name in ("tokenizer.json","tokenizer_config.json","generation_config.json")}; (c/"provenance.json").write_text(json.dumps(p))
+    assert compare(r,c,tmp_path/"out")["passed"]
+    trace["generated_token_ids"]=[5,9]; (c/"generation.json").write_text(json.dumps(trace))
+    with pytest.raises(ValueError): compare(r,c,tmp_path/"bad")
 def test_corruption_fails(tmp_path):
     def bad(r,c):
         a=np.fromfile(c/"layer-0.f32",dtype=np.float32);a[0]=99;a.tofile(c/"layer-0.f32")
@@ -78,7 +107,7 @@ def test_provenance_failures(tmp_path, mutation):
         (c/"provenance.json").write_text(json.dumps(provenance))
     with pytest.raises(ValueError): compare(r,c,tmp_path/"out")
 
-@pytest.mark.parametrize("mutation", ["missing-config-both", "missing-index-both", "missing-source-both", "empty-shards-both", "malformed-hash-both", "reference-status"])
+@pytest.mark.parametrize("mutation", ["missing-config-both", "missing-index-both", "missing-source-both", "missing-configuration-source-both", "empty-shards-both", "malformed-hash-both", "size-both", "reference-status"])
 def test_common_provenance_omissions_fail_closed(tmp_path, mutation):
     r,c=make(tmp_path)
     report=json.loads((r/"report.json").read_text())
@@ -89,10 +118,14 @@ def test_common_provenance_omissions_fail_closed(tmp_path, mutation):
         del report["checkpoint"]["index"]; del provenance["checkpoint"]["index"]
     elif mutation == "missing-source-both":
         del report["source"]["sha256"]; del provenance["original_source"]["modeling_bailing_moe_v2.py"]
+    elif mutation == "missing-configuration-source-both":
+        del report["source"]["configuration_sha256"]; del provenance["original_source"]["configuration_bailing_moe_v2.py"]
     elif mutation == "empty-shards-both":
         report["checkpoint"]["shards"]={}; provenance["checkpoint"]["shards"]={}
     elif mutation == "malformed-hash-both":
         report["checkpoint"]["config"]["sha256"]="bad"; provenance["checkpoint"]["config"]["sha256"]="bad"
+    elif mutation == "size-both":
+        report["checkpoint"]["config"]["size"]=2
     else:
         report["status"]="failed"
     (r/"report.json").write_text(json.dumps(report)); (c/"provenance.json").write_text(json.dumps(provenance))

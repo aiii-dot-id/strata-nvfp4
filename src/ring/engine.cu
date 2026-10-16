@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstring>
 #include <cuda_runtime.h>
 #include <filesystem>
@@ -15,12 +16,19 @@
 #include <strata/kernels/bf16_gemv.hpp>
 #include <strata/ring/attention.hpp>
 #include <strata/ring/expert_cache.hpp>
+#include <strata/ring/generation.hpp>
 #include <strata/ring/numerics.hpp>
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
 #include <vector>
 
 namespace sr = strata::ring;
+static volatile std::sig_atomic_t cancelled = 0;
+static void cancel_handler(int) { cancelled = 1; }
+static void check_cancelled() {
+  if (cancelled)
+    throw std::runtime_error("execution cancelled; no successful receipt");
+}
 static void check(cudaError_t e) {
   if (e != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(e));
@@ -156,13 +164,15 @@ static void write_row(const std::filesystem::path &p,
 }
 int main(int argc, char **argv) {
   try {
-    if (argc != 7)
-      throw std::runtime_error("usage: strata_ring_bf16 ROOT MANIFEST "
-                               "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID");
+    if (argc < 7 || (argc - 7) % 2)
+      throw std::runtime_error(
+          "usage: strata_ring_bf16 ROOT MANIFEST "
+          "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
+          "[--generate N --eos CSV] [--logits-mode all|last]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
       throw std::runtime_error("refusing existing output directory");
-    const size_t cache_mib = std::stoull(argv[5]);
+    const size_t cache_mib = sr::unsigned_decimal(argv[5]);
     if (cache_mib < 6 || cache_mib > 2048)
       throw std::runtime_error("cache budget must be 6..2048 MiB");
     const std::string identity = argv[6];
@@ -170,18 +180,34 @@ int main(int argc, char **argv) {
         identity.find_first_not_of("0123456789abcdef") != std::string::npos)
       throw std::runtime_error(
           "checkpoint identity must be a SHA-256 hex digest");
-    std::vector<int> tokens;
-    std::stringstream text(argv[3]);
-    std::string item;
-    while (std::getline(text, item, ',')) {
-      size_t end = 0;
-      int n = std::stoi(item, &end);
-      if (end != item.size() || n < 0 || n >= 157184)
-        throw std::runtime_error("invalid token ID");
-      tokens.push_back(n);
+    size_t generate = 0;
+    std::vector<int> eos;
+    std::string logits_mode = "all";
+    std::vector<std::string> options;
+    for (int i = 7; i < argc; i += 2) {
+      const std::string option = argv[i];
+      if (std::find(options.begin(), options.end(), option) != options.end())
+        throw std::invalid_argument("duplicate option");
+      options.push_back(option);
+      if (option == "--generate")
+        generate = sr::unsigned_decimal(argv[i + 1]);
+      else if (option == "--eos")
+        eos = sr::vocabulary_ids(argv[i + 1], 157184);
+      else if (option == "--logits-mode")
+        logits_mode = argv[i + 1];
+      else
+        throw std::invalid_argument("unknown option");
     }
-    if (tokens.empty() || tokens.size() > 4096)
-      throw std::runtime_error("reference window must contain 1..4096 tokens");
+    if (logits_mode != "all" && logits_mode != "last")
+      throw std::invalid_argument("logits mode must be all or last");
+    if (generate && logits_mode != "all")
+      throw std::invalid_argument(
+          "generation requires all logits for validation");
+    sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3], 157184),
+                                    generate, eos);
+    const auto &tokens = generation.evaluated();
+    std::signal(SIGINT, cancel_handler);
+    std::signal(SIGTERM, cancel_handler);
     sr::TensorStore store(argv[1], argv[2]);
     const auto &embedding = store.tensor("model.word_embeddings.weight");
     shape(embedding, {157184, 2048});
@@ -229,7 +255,7 @@ int main(int argc, char **argv) {
     };
     std::vector<sr::KvCache> kv;
     for (int i = 0; i < 20; ++i)
-      kv.emplace_back(tokens.size(), 4, 128);
+      kv.emplace_back(generation.kv_capacity(), 4, 128);
     sr::AttentionConfig attention;
     attention.rope_dim = 64;
     const sr::RouterConfig routing{256, 8, 4, 8, 2.5f};
@@ -238,6 +264,7 @@ int main(int argc, char **argv) {
     routes << std::setprecision(9);
     const auto start = std::chrono::steady_clock::now();
     for (size_t pos = 0; pos < tokens.size(); ++pos) {
+      check_cancelled();
       std::vector<float> h(2048);
       for (size_t i = 0; i < h.size(); ++i) {
         uint16_t b;
@@ -246,6 +273,7 @@ int main(int argc, char **argv) {
         h[i] = bf16(b);
       }
       for (int layer = 0; layer < 20; ++layer) {
+        check_cancelled();
         const std::string pre = "model.layers." + std::to_string(layer) + ".";
         auto a = norm(h, store.tensor(pre + "input_layernorm.weight"));
         const auto &qkv_weight =
@@ -303,12 +331,24 @@ int main(int argc, char **argv) {
       }
       h = norm(h, store.tensor("model.norm.weight"));
       write_row(output / "final-hidden.f32", h);
-      auto logits = mv.apply(store.tensor("lm_head.weight"), h);
-      write_row(output / "logits.f32", logits);
-      std::cerr << "token " << pos << " complete; top1 "
-                << std::distance(logits.begin(),
-                                 std::max_element(logits.begin(), logits.end()))
-                << '\n';
+      if (logits_mode == "all" || pos + 1 == tokens.size()) {
+        auto logits = mv.apply(store.tensor("lm_head.weight"), h);
+        write_row(output / "logits.f32", logits);
+        const auto top = std::distance(
+            logits.begin(), std::max_element(logits.begin(), logits.end()));
+        if (generation.sampling_position(pos))
+          generation.sample(pos, logits);
+        std::cerr << "token " << pos << " complete; top1 " << top << '\n';
+      } else if (pos % 64 == 0)
+        std::cerr << "prefill " << pos << '\n';
+    }
+    check_cancelled();
+    if (generate) {
+      std::ofstream generated(output / "generation.json");
+      generated << generation.receipt();
+      generated.flush();
+      if (!generated)
+        throw std::runtime_error("generation receipt write failed");
     }
     auto stats = cache.stats();
     routes.flush();
@@ -327,6 +367,8 @@ int main(int argc, char **argv) {
             << "{\"status\":\"executed\",\"model\":\"Ring-mini-2.0\","
                "\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
             << tokens.size() << ",\"token_ids\":" << token_json.str()
+            << ",\"logits_mode\":\"" << logits_mode << "\",\"logits_tokens\":"
+            << (logits_mode == "all" ? tokens.size() : 1)
             << ",\"checkpoint_id\":\"" << identity
             << "\",\"layers\":20,\"cache_budget_bytes\":" << budget
             << ",\"cache_resident_bytes\":" << stats.bytes
@@ -336,7 +378,8 @@ int main(int argc, char **argv) {
                "allocator overhead, one staged expert, mmap pages and other "
                "working buffers\""
             << ",\"host_kv_capacity_bytes\":"
-            << size_t(20) * tokens.size() * 4 * 128 * 2 * sizeof(float)
+            << size_t(20) * generation.kv_capacity() * 4 * 128 * 2 *
+                   sizeof(float)
             << ",\"cache_hits\":" << stats.hits
             << ",\"cache_misses\":" << stats.misses
             << ",\"cache_evictions\":" << stats.evictions

@@ -1,9 +1,11 @@
 // AI Identity Incorported <james@aiii.id>
 #include <cassert>
 #include <cfloat>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <strata/ring/numerics.hpp>
+#include <vector>
 
 template <class Fn> void rejects(Fn fn) {
   bool threw = false;
@@ -14,8 +16,37 @@ template <class Fn> void rejects(Fn fn) {
   }
   assert(threw);
 }
+
+void proves_balanced_reduction() {
+  const auto check = [](std::vector<float> values) {
+    double reference = 0.0;
+    float sequential = 0.0f;
+    for (const float value : values) {
+      reference += static_cast<double>(value) * static_cast<double>(value);
+      sequential += value * value;
+    }
+    const float balanced =
+        strata::ring::balanced_sum_squares(values.data(), values.size());
+    const double sequential_error =
+        std::fabs(static_cast<double>(sequential) - reference);
+    const double balanced_error =
+        std::fabs(static_cast<double>(balanced) - reference);
+    assert(std::isfinite(balanced));
+    assert(balanced_error < sequential_error);
+  };
+
+  std::vector<float> wide(2048, 1.0f);
+  wide[0] = 10000.0f;
+  check(wide);
+
+  std::vector<float> medium(128, 1.0f);
+  medium[0] = 5000.0f;
+  check(medium);
+}
+
 int main() {
   using strata::ring::rms_norm;
+  proves_balanced_reduction();
   const auto v = rms_norm({3.f, 4.f}, {1.f, 2.f});
   const float inv = 1.f / std::sqrt(12.5f + 1e-6f);
   assert(v[0] == 3.f * inv && v[1] == 8.f * inv);

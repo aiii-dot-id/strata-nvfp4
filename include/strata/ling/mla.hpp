@@ -1,0 +1,31 @@
+// AI Identity Incorported <james@aiii.id>
+#pragma once
+#include <cstddef>
+#include <vector>
+
+namespace strata::ling {
+struct MlaConfig {
+  size_t heads = 16, nope = 128, rope = 64, value = 128;
+  float theta = 6000000.0f;
+};
+class MlaCache {
+  MlaConfig config_;
+  size_t capacity_, length_ = 0;
+  std::vector<float> keys_, values_;
+public:
+  MlaCache(MlaConfig config, size_t capacity);
+  size_t length() const { return length_; }
+  size_t capacity() const { return capacity_; }
+  const std::vector<float> &keys() const { return keys_; }
+  const std::vector<float> &values() const { return values_; }
+  // Inputs are projected Q, per-head nonrotary K, shared rotary K, V,
+  // and one gate logit per head. Projection/norm weights live in the engine.
+  // A failed call leaves both cache arrays and length unchanged.
+  std::vector<float> step(const std::vector<float> &query,
+                          const std::vector<float> &key_nope,
+                          const std::vector<float> &key_rope,
+                          const std::vector<float> &value,
+                          const std::vector<float> &gate_logits,
+                          size_t position);
+};
+}

@@ -1,0 +1,155 @@
+{
+  "schema": "strata-ring-generation-qualification-v1",
+  "attribution": "AI Identity Incorported <james@aiii.id>",
+  "model": "Ring-mini-2.0",
+  "branch": "ling-ring-bf16",
+  "hardware": "dev8 RTX 4070 Ti sm_89",
+  "weight_precision": "original BF16 with original FP32 metadata",
+  "activation_precision": "FP32",
+  "quantized": false,
+  "production_promoted": false,
+  "strict_all_cases_passed": false,
+  "generation_scope": "greedy choices verified on original causal teacher-forced trace; bounded development cases, not capability benchmark",
+  "cases": [
+    {
+      "case": "context-512",
+      "prompt_tokens": 512,
+      "generated_tokens": 8,
+      "evaluated_positions": 519,
+      "finish_reason": "length",
+      "native_wall_seconds": 140.207733743,
+      "strict_comparison": {
+        "schema": "ring-reference-compare-v1",
+        "passed": false,
+        "error": "expert route mismatch at position/layer (172, 7): expected [70, 86, 183, 253, 94, 119, 93, 227], got [70, 86, 183, 253, 94, 119, 93, 241]"
+      }
+    },
+    {
+      "case": "short",
+      "prompt_tokens": 29,
+      "generated_tokens": 128,
+      "evaluated_positions": 156,
+      "finish_reason": "length",
+      "native_wall_seconds": 42.175980703,
+      "strict_comparison": {
+        "layers": 20,
+        "logits_tokens": 156,
+        "max_errors": {
+          "final_hidden_max_abs": 0.00014495849609375,
+          "hidden_layers_max_abs": 0.00390625,
+          "logits_max_abs": 0.000102996826171875,
+          "route_weight_max_abs": 2.384038726765958e-06
+        },
+        "passed": true,
+        "route_count": 2964,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 156,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      }
+    },
+    {
+      "case": "context-128",
+      "prompt_tokens": 128,
+      "generated_tokens": 8,
+      "evaluated_positions": 135,
+      "finish_reason": "length",
+      "native_wall_seconds": 40.836838477,
+      "strict_comparison": {
+        "layers": 20,
+        "logits_tokens": 135,
+        "max_errors": {
+          "final_hidden_max_abs": 0.0001697540283203125,
+          "hidden_layers_max_abs": 0.0029296875,
+          "logits_max_abs": 9.498000144958496e-05,
+          "route_weight_max_abs": 9.239161712693011e-06
+        },
+        "passed": true,
+        "route_count": 2565,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 135,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      }
+    },
+    {
+      "case": "context-1024",
+      "prompt_tokens": 1024,
+      "generated_tokens": 8,
+      "evaluated_positions": 1031,
+      "finish_reason": "length",
+      "native_wall_seconds": 310.09477427,
+      "strict_comparison": {
+        "passed": false,
+        "native_vs_cpu_reference": {
+          "route_rows": 19589,
+          "ordered_route_mismatch_rows": 66,
+          "set_route_mismatch_rows": 17,
+          "slotwise_router_weight_max_abs": 0.8081528394125976,
+          "keyed_router_weight_max_abs": 0.34563636586120605,
+          "hidden_max_abs": 56.40789794921875,
+          "final_hidden_max_abs": 4.081207275390625,
+          "logits_max_abs": 2.0693588256835938,
+          "top1_mismatch_rows": 0,
+          "generated_choice_mismatch": 0
+        },
+        "original_cpu_vs_cuda": {
+          "ordered_route_mismatch_rows": 31,
+          "set_route_mismatch_rows": 4,
+          "top1_mismatch_rows": 0
+        },
+        "tolerances_unchanged": true
+      }
+    },
+    {
+      "case": "natural_completion",
+      "prompt_tokens": 29,
+      "generated_tokens": 347,
+      "evaluated_positions": 375,
+      "finish_reason": "eos",
+      "strict_comparison": {
+        "layers": 20,
+        "logits_tokens": 375,
+        "max_errors": {
+          "final_hidden_max_abs": 0.0002460479736328125,
+          "hidden_layers_max_abs": 0.00390625,
+          "logits_max_abs": 0.00013902783393859863,
+          "route_weight_max_abs": 1.3471057220493243e-05
+        },
+        "passed": true,
+        "route_count": 7125,
+        "schema": "ring-reference-compare-v1",
+        "tokens": 375,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true,
+        "vocab": 157184
+      }
+    }
+  ],
+  "expert_cache_replay_bitwise": true,
+  "cancellation_passed": true,
+  "evidence_root": "/work/AI/experiments/ring-generation-20261016-r2",
+  "evidence_sha256": {
+    "PLAN.json": "1d49d7629aa950cb99d8dd2c6c3a971a22083b56b0c04ab09cca615cdfb3076d",
+    "GENERATION-CONTEXT-RESULT.json": "58f5d0bc724f3a1d3381c92bc6578df1f7ecac2a6005d992eda34f043a0c0287",
+    "SUPPLEMENTAL-RESULT.json": "95fe146144ea91ff3c856089df7639b0be044877893569a56ba438d263d83fa8",
+    "SUPPLEMENTAL-EOS-PLAN.json": "7be75391dda60902e8dc57a00cd39720c9beb7b874a4c1e5da00d118fd91f9f8",
+    "SUPPLEMENTAL-EOS-RESULT.json": "ae679f33e9e722cdb9d0a7e04649f01965e343a0ffc957865282643c781e4b4a",
+    "EVIDENCE-AUDIT.json": "6ab74df81ed40f4ec6db56501ee6cb18022803be96b48f142f8c4aba25888fae",
+    "original-context-512-cpu-vs-cuda.json": "ce0268441a557c25a0f1254668b0505866849ab0282162a1676e814ab51d6145",
+    "cpu-native512-diagnostic.json": "e245132ca6699ff0b0ae40064d6bdf96d49c931775e56d4d9c6b3a1d5b58f099",
+    "original-context-1024-cpu-vs-native-summary.json": "cf72ca9e0a9ec75170a6b0f612c7234a56bbb10120b65eb670d9aaa0b9a61634",
+    "original-context-1024-cpu-vs-cuda-summary.json": "de92e169ae77f77767b21501b475cda0c326f22f2c9f617956822e8272f82331"
+  }
+}

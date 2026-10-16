@@ -1,4 +1,5 @@
 #include "strata/ring/attention.hpp"
+#include "strata/ring/numerics.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -6,6 +7,21 @@
 #include <stdexcept>
 
 namespace strata::ring {
+
+float rope_inverse_frequency(float theta, int64_t rope_dim,
+                            int64_t index) noexcept {
+  if (!(theta > 0.0f) || !std::isfinite(theta) || rope_dim <= 0 ||
+      (rope_dim & 1) || index < 0 || index >= rope_dim / 2)
+    return std::numeric_limits<float>::quiet_NaN();
+  const float exponent = 2.0f * float(index) / float(rope_dim);
+  const float denominator = std::pow(theta, exponent);
+  if (!(denominator > 0.0f) || !std::isfinite(denominator))
+    return std::numeric_limits<float>::quiet_NaN();
+  const float inverse = 1.0f / denominator;
+  return std::isfinite(inverse) ? inverse
+                                 : std::numeric_limits<float>::quiet_NaN();
+}
+
 namespace {
 bool positive(int64_t x) { return x > 0; }
 bool valid_geometry(const AttentionConfig &c, std::string &e) {
@@ -38,14 +54,17 @@ bool finite_array(const float *p, size_t n) {
 }
 bool rms_norm(const float *x, float *y, int64_t dim, float eps,
               const float *w) {
+  if (!x || !y || dim <= 0)
+    return false;
   float sum = 0.0f;
-  for (int64_t i = 0; i < dim; ++i) {
-    const float term = x[i] * x[i];
-    if (!std::isfinite(term) || !std::isfinite(sum += term))
-      return false;
+  try {
+    sum = balanced_sum_squares(x, size_t(dim));
+  } catch (const std::exception &) {
+    return false;
   }
-  const float inv = 1.0f / std::sqrt(sum / float(dim) + eps);
-  if (!std::isfinite(inv))
+  const float variance = sum / float(dim) + eps;
+  const float inv = 1.0f / std::sqrt(variance);
+  if (!std::isfinite(variance) || !std::isfinite(inv))
     return false;
   for (int64_t i = 0; i < dim; ++i) {
     y[i] = x[i] * inv * (w ? w[i] : 1.0f);
@@ -59,7 +78,7 @@ bool rope(const float *x, float *y, int64_t dim, int64_t rope_dim,
   std::copy(x, x + dim, y);
   const int64_t half = rope_dim / 2;
   for (int64_t i = 0; i < half; ++i) {
-    const float inv = std::pow(theta, -2.0f * float(i) / float(rope_dim));
+    const float inv = rope_inverse_frequency(theta, rope_dim, i);
     const float angle = float(position) * inv;
     const float co = std::cos(angle), si = std::sin(angle);
     const float a = x[i], b = x[i + half];

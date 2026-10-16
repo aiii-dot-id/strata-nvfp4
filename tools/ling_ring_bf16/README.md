@@ -22,10 +22,17 @@ The current Ring reference executor includes:
 - A token-ID full-forward reference executor that writes hidden states, logits,
   route traces, and an execution receipt.
 
-The executor is a reference tool. It does not provide the production server,
-tokenizer, text generation loop, or production model-loader integration. Ling-
-3.0-tiny is not implemented yet; its KDA/MLA path remains a later architecture
-boundary. There are no timing comparison or throughput claims here.
+The executors are reference tools and do not provide the production server
+or production model-loader integration. The Ring token-ID executor has a
+separate greedy frontend that uses the original checkpoint tokenizer and chat
+template. Ling has an original-model forward reference runner with KDA/MLA
+execution and bounded four-token plus 64/65-token GPU evidence recorded in
+`LING_VALIDATION.md`. The 64-token case passed its strict gates; the standard
+65-token case failed strict comparison with 319 ordered-route differences. A separate fused-recurrent 65-token
+diagnostic matched its strict numeric and route gates, but is diagnostic-only
+and does not qualify the default path; long-context and production
+qualification remain pending. There are no timing
+comparison or throughput claims here.
 
 Author attribution: AI Identity Incorported <james@aiii.id>
 
@@ -114,11 +121,19 @@ run. It binds those hashes to the actual output bytes. Hashing the checkpoint
 reads all payload bytes; allow for that CPU and storage work. The raw executable
 is useful for development, but an unwrapped run cannot pass the comparator.
 
-The original-model reference runs the checkpoint's own decoder classes on the
-CPU, one layer at a time, with original BF16 values widened exactly to FP32.
-It executes the checkpoint's Python code, so the checkpoint must be trusted.
-The measured reference used CPU torch 2.14.1 and transformers 4.52.3 in an
-isolated environment. The comparator needs NumPy; the launcher is stdlib-only.
+The original Ring reference runs the checkpoint's own decoder classes one
+layer at a time, with original BF16 values widened exactly to FP32. It supports
+CPU and CUDA reference execution. Ling's reference runner uses the same
+one-layer residency and widened-FP32 policy; its model forward requires CUDA
+with the installed FLA path, while CPU coverage is limited to import/meta,
+report-contract, and negative CLI tests. The measured four-token Ling GPU
+forward and 5 MiB cache replay are recorded in `LING_VALIDATION.md`.
+Ling CUDA execution requires at least 6 GiB free before execution and rejects a
+reference peak above 5 GiB. CUDA and cuDNN TF32 flags are disabled for the host/runtime configuration.
+This does not establish Triton/FLA chunk-kernel precision: the installed FLA
+chunk_intra.py contains explicit TF32 solve constants. These runners execute
+trusted checkpoint Python code. The comparator needs NumPy; the
+launchers are stdlib-only.
 
 ~~~sh
 python3 tools/ling_ring_bf16/ring_original_reference.py \
@@ -130,12 +145,70 @@ python3 tools/ling_ring_bf16/compare_ring_reference.py \
   --output /tmp/ring-comparison
 ~~~
 
+## Ling original reference
+
+The Ling runner streams the original 24 decoder layers one at a time, widens
+BF16 checkpoint tensors to FP32, records all hidden states, logits, and routed
+expert traces, and emits comparator-compatible provenance. It covers the
+source KDA/MLA implementation and the 24-layer geometry. It is a token-ID
+reference runner; text tokenization and generation are outside this Ling
+forward tool.
+
+Use the isolated reference environment prepared for Ling:
+
+~~~sh
+/work/AI/experiments/ling-strata-20261016/reference-env/bin/python \
+  tools/ling_ring_bf16/ling_original_reference.py \
+  --checkpoint /path/to/Ling-3.0-tiny \
+  --source /path/to/Ling-3.0-tiny/modeling_bailing_moe_v3.py \
+  --tokens 1,2,3 --device cuda --logits-mode all \
+  --output /tmp/ling-original
+~~~
+
+The focused CPU tests use the same isolated environment:
+
+~~~sh
+OMP_NUM_THREADS=4 /work/AI/experiments/ling-strata-20261016/reference-env/bin/python \
+  -m pytest -q tools/ling_ring_bf16/tests/test_ling_original_reference.py
+~~~
+
+## Greedy generation frontend
+
+`generate_ring.py` is the local text frontend for the verified Ring executor.
+It loads the original checkpoint tokenizer and applies its chat template, then
+binds `tokenizer.json`, `tokenizer_config.json`, `generation_config.json`,
+and any available `special_tokens_map.json` through the verified-run receipt.
+The frontend uses greedy next-token selection and prints the decoded generated
+text. It does not download tokenizer files or use an external model.
+
+The generation request requires the checkpoint's configured EOS IDs and a
+positive `--max-new-tokens` value. Generation stops at the first configured
+EOS token or at the requested length, and the prompt plus generated sequence
+must fit the 4096-token evaluation window. The native trace records the prompt,
+generated IDs, EOS configuration, budget, and finish reason; the comparator
+derives the expected greedy IDs from the original reference logits.
+
+~~~sh
+python3 tools/ling_ring_bf16/generate_ring.py \
+  --checkpoint /path/to/Ring-mini-2.0 \
+  --manifest /tmp/ring-admission/manifest.tsv \
+  --executable /tmp/strata-ring-cuda/strata_ring_bf16 \
+  --prompt "Write a short greeting." \
+  --output /tmp/ring-generation \
+  --cache-mib 1024 --max-new-tokens 128
+~~~
+
+Generation output and tokenizer decoding are frontend evidence. They do not
+establish native BF16 activation equivalence, generated-answer quality, or
+production serving readiness.
+
 This is a numerical architecture gate against original weights and original
-model code in a common FP32 activation domain. It is not a claim of bitwise
-agreement with the model's native BF16 activation path, unrestricted context
-support, generated-answer quality, or production serving readiness. Reference
-receipts bind the original modeling source; the wrapper also records the
-configuration source, whose hash was not part of the original reference report.
+model code in a common FP32 internal activation and trace domain. It is not a
+claim of native BF16 activation equivalence, unrestricted context support,
+generated-answer quality, or production serving readiness. Reference
+receipts bind both original modeling and configuration sources; the original
+reference report records both source hashes and the verified wrapper binds them
+to the native run.
 The receipt and source files are operator-controlled evidence, not signatures
 or protection against a malicious evaluator modifying every record together.
 
@@ -187,7 +260,12 @@ fixture SHA-256 values against their export manifests before execution.
 
 ## Architecture boundary
 
-Ring is the first implemented reference path. Ling requires a separate KDA/MLA
-implementation, tensor-layout validation, attention state, routing semantics,
-and BF16 expert dispatch. The existing production Qwen runtime files and
-defaults remain unchanged; this directory is an opt-in reference tool.
+Ring and the Ling original-model reference are implemented as opt-in tools. Ling
+has bounded four-token and 64/65-token GPU evidence; the 64-token case passed
+its strict gates, while the standard 65-token case failed strict comparison
+with 319 ordered-route differences. The forced-recurrent diagnostic completed with strict scoped gates but remains
+diagnostic-only; it does not qualify the default path. Longer contexts,
+production serving, Ling generation integration, and any production default
+changes remain pending. Ring's separate generation frontend uses the
+original checkpoint tokenizer and chat template, as described above. The
+existing production Qwen runtime files and defaults remain unchanged.

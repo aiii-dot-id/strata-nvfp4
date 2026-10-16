@@ -1,5 +1,10 @@
 import json
+import os
+import signal
 import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,7 +31,7 @@ def checkpoint(tmp_path):
 
 
 def fake_engine(monkeypatch, mutate=None):
-    def run(argv, **kwargs):
+    def launch(argv, **kwargs):
         output = Path(argv[4])
         output.mkdir()
         (output / "routes.tsv").write_text("\n".join(f"0\t{layer}\t" + "\t".join(f"{x}:0.1" for x in range(8)) for layer in range(1, 20)) + "\n")
@@ -41,8 +46,13 @@ def fake_engine(monkeypatch, mutate=None):
         }))
         if mutate:
             mutate(Path(argv[1]))
-        return SimpleNamespace(returncode=0, stderr="")
-    monkeypatch.setattr(verified.subprocess, "run", run)
+        class Finished:
+            pid = os.getpid()
+            returncode = 0
+            def communicate(self, timeout=None): return "", ""
+            def wait(self, timeout=None): return 0
+        return Finished()
+    monkeypatch.setattr(verified.subprocess, "Popen", launch)
 
 
 def test_manifest_mismatch_refused(tmp_path):
@@ -67,3 +77,120 @@ def test_verified_receipt_binds_manifest_and_outputs(tmp_path, monkeypatch):
     assert receipt["status"] == "verified"
     assert receipt["checkpoint_id"] == receipt["manifest"]["sha256"]
     assert set(receipt["native_outputs"]) == set(verified.EXPECTED_NATIVE)
+
+
+def test_cli_repeated_bind_file_is_recorded(tmp_path):
+    root, manifest = checkpoint(tmp_path)
+    first = root / "tokenizer.json"; second = root / "tokenizer_config.json"
+    first.write_text("{}")
+    second.write_text("{}")
+    executable = tmp_path / "engine.py"
+    executable.write_text("""#!/usr/bin/env python3
+import json, pathlib, sys
+o = pathlib.Path(sys.argv[4]); o.mkdir()
+(o / \"routes.tsv\").write_text(\"\".join(f\"0\\t{layer}\\t\" + \"\\t\".join(f\"{x}:0.1\" for x in range(8)) + \"\\n\" for layer in range(1, 20)))
+for layer in range(20): (o / f\"layer-{layer}.f32\").write_bytes(bytes(4))
+(o / \"final-hidden.f32\").write_bytes(bytes(4)); (o / \"logits.f32\").write_bytes(bytes(4))
+(o / \"execution.json\").write_text(json.dumps({\"status\":\"executed\",\"model\":\"Ring-mini-2.0\",\"activation_dtype\":\"FP32\",\"quantized\":False,\"tokens\":1,\"token_ids\":[1],\"layers\":20,\"checkpoint_id\":sys.argv[6]}))
+""")
+    executable.chmod(0o755)
+    output = tmp_path / "out"
+    command = [sys.executable, "tools/ling_ring_bf16/run_ring_verified.py", "--checkpoint", str(root),
+               "--manifest", str(manifest), "--executable", str(executable), "--tokens", "1",
+               "--output", str(output), "--cache-mib", "6", "--bind-file", str(first),
+               "--bind-file", str(second)]
+    completed = subprocess.run(command, cwd=Path(__file__).parents[3], check=True, capture_output=True, text=True)
+    receipt = json.loads((output / "provenance.json").read_text())
+    assert set(receipt["frontend"]) == {"tokenizer.json", "tokenizer_config.json"}
+    assert json.loads(completed.stdout)["status"] == "verified"
+
+
+def test_verified_generation_requires_eos_and_binds_trace(tmp_path, monkeypatch):
+    root, manifest = checkpoint(tmp_path)
+    binding=[root / name for name in ("tokenizer.json", "tokenizer_config.json", "generation_config.json")]
+    for path in binding: path.write_text("{}")
+    def run(argv, **kwargs):
+        output=Path(argv[4]); output.mkdir()
+        (output / "routes.tsv").write_text("\n".join(f"0\t{layer}\t" + "\t".join(f"{x}:0.1" for x in range(8)) for layer in range(1,20)) + "\n")
+        for layer in range(20): (output / f"layer-{layer}.f32").write_bytes(b"\0\0\0\0")
+        (output / "final-hidden.f32").write_bytes(b"\0\0\0\0"); (output / "logits.f32").write_bytes(b"\0\0\0\0")
+        (output / "execution.json").write_text(json.dumps({"status":"executed","model":"Ring-mini-2.0","activation_dtype":"FP32","quantized":False,"tokens":2,"token_ids":[1,3],"layers":20,"checkpoint_id":argv[6],"logits_mode":"all","logits_tokens":2}))
+        (output / "generation.json").write_text(json.dumps({"prompt_token_ids":[1],"generated_token_ids":[3,9],"eos_token_ids":[9],"max_new_tokens":2,"finish_reason":"eos"}))
+        class Finished:
+            pid = os.getpid()
+            returncode = 0
+            def communicate(self, timeout=None): return "", ""
+            def wait(self, timeout=None): return 0
+        return Finished()
+    monkeypatch.setattr(verified.subprocess, "Popen", run)
+    with pytest.raises(verified.VerificationError, match="EOS"):
+        verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "bad", 6, generate=2)
+    receipt=verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "good", 6, generate=2, eos_ids="9", binding_files=binding)
+    assert receipt["generation"]["generated_token_ids"] == [3, 9]
+
+
+def test_cancellation_writes_no_receipt(tmp_path, monkeypatch):
+    root, manifest = checkpoint(tmp_path)
+    started = tmp_path / "started"
+    executable = tmp_path / "sleep-engine.py"
+    executable.write_text("#!/usr/bin/env python3\nimport os, time\nopen(os.environ[\"RING_STARTED\"], \"w\").write(str(os.getpid()))\ntime.sleep(60)\n")
+    executable.chmod(0o755)
+    output = tmp_path / "out"
+    env = dict(os.environ, RING_STARTED=str(started))
+    command = [sys.executable, "tools/ling_ring_bf16/run_ring_verified.py", "--checkpoint", str(root),
+               "--manifest", str(manifest), "--executable", str(executable), "--tokens", "1",
+               "--output", str(output), "--cache-mib", "6", "--timeout", "30"]
+    runner = subprocess.Popen(command, cwd=Path(__file__).parents[3], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    deadline = time.monotonic() + 10
+    while not started.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert started.exists()
+    child_pid = int(started.read_text())
+    runner.send_signal(signal.SIGTERM)
+    assert runner.wait(timeout=10) != 0
+    for _ in range(100):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("owned child survived wrapper cancellation")
+    assert not (output / "provenance.json").exists()
+
+
+def test_signal_during_spawn_terminates_new_owned_child(monkeypatch):
+    terminated = []
+
+    class Finished:
+        pid = 424242
+        returncode = 143
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def launch(argv, **kwargs):
+        # Exercise the exact race window: the handler is installed, but proc
+        # has not yet been assigned by _run_owned.
+        signal.raise_signal(signal.SIGTERM)
+        return Finished()
+
+    monkeypatch.setattr(verified.subprocess, "Popen", launch)
+    monkeypatch.setattr(verified, "_terminate_owned", lambda proc: terminated.append(proc))
+    with pytest.raises(verified.VerificationError, match="cancelled by SIGTERM"):
+        verified._run_owned(["fake"], 1)
+    assert len(terminated) == 1
+    assert isinstance(terminated[0], Finished)
+
+
+def test_spawn_failure_restores_signal_handlers(monkeypatch):
+    previous = {name: signal.getsignal(getattr(signal, name)) for name in ("SIGINT", "SIGTERM")}
+
+    def launch(argv, **kwargs):
+        raise OSError("synthetic spawn failure")
+
+    monkeypatch.setattr(verified.subprocess, "Popen", launch)
+    with pytest.raises(OSError, match="synthetic spawn failure"):
+        verified._run_owned(["fake"], 1)
+    assert signal.getsignal(signal.SIGINT) is previous["SIGINT"]
+    assert signal.getsignal(signal.SIGTERM) is previous["SIGTERM"]

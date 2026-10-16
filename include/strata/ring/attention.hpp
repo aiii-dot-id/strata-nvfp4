@@ -5,6 +5,11 @@
 
 namespace strata::ring {
 
+/// Returns the Float32 inverse frequency used by the original Ring RoPE
+/// construction. Invalid arguments return NaN.
+float rope_inverse_frequency(float theta, int64_t rope_dim,
+                            int64_t index) noexcept;
+
 struct AttentionConfig {
   int64_t n_head = 16;
   int64_t n_head_kv = 4;

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <limits>
 #include <stdexcept>
@@ -18,6 +20,21 @@ void check(bool ok, const char *text) {
 }
 bool near(float a, float b, float tol = 2e-5f) {
   return std::abs(a - b) <= tol * (1.0f + std::max(std::abs(a), std::abs(b)));
+}
+bool near_abs(float a, float b, float tol = 2e-6f) {
+  return std::abs(a - b) <= tol;
+}
+uint32_t bits(float value) {
+  uint32_t result = 0;
+  std::memcpy(&result, &value, sizeof(result));
+  return result;
+}
+bool near_ulp(float a, float b, uint32_t max_ulps = 4) {
+  if (!(a >= 0.0f) || !(b >= 0.0f))
+    return false;
+  const uint32_t ia = bits(a), ib = bits(b);
+  const uint32_t distance = ia >= ib ? ia - ib : ib - ia;
+  return distance <= max_ulps;
 }
 void reference(const strata::ring::AttentionConfig &c, const float *q,
                const float *k, const float *v, int64_t nt, int64_t pos,
@@ -39,8 +56,8 @@ void reference(const strata::ring::AttentionConfig &c, const float *q,
     std::copy(x, x + c.head_dim, y);
     const int64_t half = c.rope_dim / 2;
     for (int64_t d = 0; d < half; ++d) {
-      const float z =
-          std::pow(c.rope_theta, -2.0f * float(d) / float(c.rope_dim));
+      const float exponent = 2.0f * float(d) / float(c.rope_dim);
+      const float z = 1.0f / std::pow(c.rope_theta, exponent);
       const float co = std::cos(float(p) * z), si = std::sin(float(p) * z);
       const float a = x[d], b = x[d + half];
       y[d] = a * co - b * si;
@@ -92,6 +109,58 @@ void reference(const strata::ring::AttentionConfig &c, const float *q,
 } // namespace
 
 int main() {
+  // Values independently captured from the authoritative Ring-mini-2.0
+  // reference (theta=600000, rope_dim=64), using Float32 inv_freq and
+  // positions from the qualification inputs.
+  struct RopeFixture {
+    int position;
+    float angle;
+    float cosine;
+    float sine;
+  };
+  const RopeFixture rope_fixture[] = {
+      {1, 0.6598311067f, 0.7900957465f, 0.6129834056f},
+      {172, 113.4909515f, 0.9235282540f, 0.3835304081f},
+      {1024, 675.6670532f, -0.9748759866f, -0.2227483094f},
+      {4095, 2702.008301f, 0.9716653824f, 0.2363606840f},
+  };
+  const float reference_inv_freq = 0.6598311067f;
+  check(near_ulp(strata::ring::rope_inverse_frequency(600000.0f, 64, 0),
+                 1.0f),
+        "RoPE index zero inverse frequency is one");
+  check(near_ulp(strata::ring::rope_inverse_frequency(600000.0f, 64, 1),
+                 reference_inv_freq),
+        "RoPE inverse frequency matches pinned Float32 reference");
+  check(near_ulp(strata::ring::rope_inverse_frequency(600000.0f, 64, 31),
+                 2.525898935e-6f),
+        "RoPE high index inverse frequency matches pinned reference");
+  // Index 2 is deliberately bit-pinned to the reciprocal-pow operation;
+  // pow(theta, -exponent) produces the adjacent Float32 value here.
+  check(bits(strata::ring::rope_inverse_frequency(600000.0f, 64, 2)) ==
+            UINT32_C(0x3edee9bd),
+        "RoPE uses reciprocal-pow operation for index two");
+  const float index_two_inv =
+      strata::ring::rope_inverse_frequency(600000.0f, 64, 2);
+  const float index_two_angle = 4095.0f * index_two_inv;
+  check(near_abs(index_two_angle, 1782.868896f) &&
+            near_abs(std::cos(index_two_angle), 0.01506500226f) &&
+            near_abs(std::sin(index_two_angle), -0.9998865128f),
+        "RoPE reciprocal-pow angle remains stable at position 4095");
+  for (const RopeFixture &fixture : rope_fixture) {
+    const float got_inv =
+        strata::ring::rope_inverse_frequency(600000.0f, 64, 1);
+    const float got_angle = float(fixture.position) * got_inv;
+    check(near_abs(got_angle, fixture.angle),
+          "RoPE angle matches pinned Float32 reference");
+    check(near_abs(std::cos(got_angle), fixture.cosine) &&
+              near_abs(std::sin(got_angle), fixture.sine),
+          "RoPE sin/cos match pinned Float32 reference");
+  }
+  check(std::isnan(strata::ring::rope_inverse_frequency(600000.0f, 64, -1)),
+        "invalid RoPE index fails closed");
+  check(std::isnan(strata::ring::rope_inverse_frequency(
+                    std::numeric_limits<float>::infinity(), 64, 31)),
+        "non-finite RoPE input fails closed");
   check(strata::ring::AttentionConfig{}.rope_dim == 64,
         "Ring default partial RoPE is 64");
   strata::ring::AttentionConfig c;
