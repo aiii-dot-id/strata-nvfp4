@@ -2,13 +2,20 @@
 
 AI Identity Incorported <james@aiii.id>
 
+Current readmission: the opt-in original-frequency repair passes 173, 375,
+and 519 positions. At 1,031 positions the additional CUDA router matches all
+19,589 ordered routes but numerical gates still fail. Adding CUDA RMS is not
+a qualified repair. See [NUMERIC_PARITY_DIAGNOSTICS.md](NUMERIC_PARITY_DIAGNOSTICS.md)
+and [CURRENT_NUMERIC_QUALIFICATION.json](CURRENT_NUMERIC_QUALIFICATION.json).
+The measurements below are preserved historical default-path evidence.
+
 This is the 2026-10-16 dev8 RTX 4070 Ti qualification of the opt-in Strata
 `ling-ring-bf16` reference path. It uses the original Ring-mini-2.0 BF16
 checkpoint and FP32 working state, without quantization. It does not qualify
 BF16 activation arithmetic, training, a production server, or general answer
 quality. The earlier four-token report remains historical evidence.
 
-## Measured outcome
+## Historical default-path generation evidence (before frequency repair)
 
 | Case | Prompt / generated tokens | Evaluated positions | Original next-token choices | Strict internal comparison |
 |---|---:|---:|---|---|
@@ -26,19 +33,19 @@ reference verification of every greedy choice, not an independently cached
 reference generation run. These cases are development checks, not a capability
 benchmark or a validated 1,024-token context quality score.
 
-The 512- and 1,024-token **strict gates remain failed**. Matching token choices
+For that historical default profile, the 512- and 1,024-token **strict gates failed**. Matching token choices
 does not establish matching hidden states. No threshold was relaxed after the
 results were seen. The gate requires every hidden/logit value to satisfy
 `abs(candidate-reference) <= 0.001 + 0.001*abs(reference)`, exact ordered expert
 IDs, and router weights within `1e-5 + 1e-4*abs(reference)`.
 
-At 512 tokens, the original CPU and CUDA implementations also disagree on
+In the historical 512-token case, the original CPU and CUDA implementations also disagree on
 21 ordered routing rows, first at position 172, layer 7, while all 519 top-1
 choices match. Diagnostics show that upstream rounding can switch an almost
 tied expert at that point. This establishes a portability issue in the
 reference itself; it does not excuse every native discrepancy.
 
-### Optional FP32-cuBLAS diagnostic
+### Historical FP32-cuBLAS diagnostic (before source-ordered candidate)
 
 An optional candidate executable was exercised with `--matmul fp32-cublas`.
 It widens each resident BF16 matrix into a temporary FP32 weight buffer of
@@ -73,12 +80,12 @@ has zero expert-set differences and one ordered-ID difference. Final hidden
 states and logits pass the unchanged numeric tolerance, but 29 intermediate
 elements do not. Thus neither reference makes strict native parity pass.
 
-The retained CUDA-cached comparisons make the boundary explicit. The
+The retained pre-frequency-repair CUDA-cached comparisons make the historical boundary explicit. The
 135-position case passed all unchanged strict gates (2,565 route rows); its
 comparison result is
 `/work/AI/experiments/ring-cached-20261016-r1/case-128/compare/result.json`
 (SHA-256
-`04c898cd71d3f88a26982b394023281a206a1418f28301d69cdfcd5f4008134b`). The
+`04c898cd71d3f88a26982b394023281a206a1418f28301d69cdfcd5f4008134b`). The historical
 519-position case failed first at position 172/layer 7, expected expert 227
 versus native 241; its result is
 `/work/AI/experiments/ring-cached-20261016-r1/case-512/compare/result.json`
@@ -142,8 +149,9 @@ decoder classes; CUDA TF32 is disabled. The checkpoint is never rewritten.
 Use the opt-in path for bounded generation and cache experiments with this
 known numerical limitation. Do not treat the longer traces as an exact
 intervention or gradient oracle, or promote this path to production on this
-evidence. The next discriminator is isolation of the pre-router operator
-rounding path (normalization, attention/cache, and projection accumulation),
-not another cached-versus-full rerun or a wider tolerance.
+evidence. The original pre-router isolation recommendation has now produced the bounded
+frequency repair described in NUMERIC_PARITY_DIAGNOSTICS.md. Remaining failures
+require further same-input CUDA operator attribution; another cached-versus-full
+rerun or a wider tolerance would not establish parity.
 
 Sev's Mac oMLX runtime was not stopped, restarted, or used for these tests.

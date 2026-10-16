@@ -139,6 +139,21 @@ int main() {
   check(bits(strata::ring::rope_inverse_frequency(600000.0f, 64, 2)) ==
             UINT32_C(0x3edee9bd),
         "RoPE uses reciprocal-pow operation for index two");
+  const uint32_t original_rope_bits[] = {
+      0x3f800000, 0x3f28eab1, 0x3edee9bf, 0x3e9315c1,
+      0x3e421a3b, 0x3e001329, 0x3da903f9, 0x3d5f0b1c,
+      0x3d132bc4, 0x3cc23749, 0x3c802654, 0x3c291d46,
+      0x3bdf2c7e, 0x3b9341cc, 0x3b42545a, 0x3b003983,
+      0x3aa93696, 0x3a5f4de6, 0x3a1357d7, 0x39c27171,
+      0x39804cb4, 0x39294fea, 0x38df6f53, 0x38936de4,
+      0x38428e8c, 0x38005fe9, 0x37a96942, 0x375f90c4,
+      0x371383f5, 0x36c2abac, 0x36807320, 0x3629829d};
+  bool original_rope_exact = true;
+  for (int i = 0; i < 32; ++i)
+    original_rope_exact &=
+        bits(strata::ring::rope_inverse_frequency(600000.0f, 64, i, true)) ==
+        original_rope_bits[i];
+  check(original_rope_exact, "original Ring RoPE frequency table is bit exact");
   const float index_two_inv =
       strata::ring::rope_inverse_frequency(600000.0f, 64, 2);
   const float index_two_angle = 4095.0f * index_two_inv;
@@ -161,6 +176,8 @@ int main() {
   check(std::isnan(strata::ring::rope_inverse_frequency(
                     std::numeric_limits<float>::infinity(), 64, 31)),
         "non-finite RoPE input fails closed");
+  check(std::isnan(strata::ring::rope_inverse_frequency(500000.0f, 64, 2, true)),
+        "original RoPE table rejects unsupported theta");
   check(strata::ring::AttentionConfig{}.rope_dim == 64,
         "Ring default partial RoPE is 64");
   strata::ring::AttentionConfig c;
@@ -190,6 +207,69 @@ int main() {
     same &= near(got[i], want[i]);
   check(same, "prefill matches independent golden");
   check(cache.length() == 3, "prefill commits three positions");
+
+  strata::ring::KvCache normalized_cache(8, 2, 4);
+  std::vector<float> normalized(q.size());
+  check(strata::ring::attention_forward_order(
+            c, q.data(), k.data(), v.data(), nt, 0, qw, kw, normalized_cache,
+            normalized.data(), err,
+            strata::ring::AttentionValueOrder::NormalizeWeightsFirst),
+        "original-order normalized-value prefill succeeds");
+  bool normalized_same = true;
+  for (size_t i = 0; i < normalized.size(); ++i)
+    normalized_same &= near(normalized[i], want[i]);
+  check(normalized_same, "original-order prefill matches independent golden");
+  check(normalized_cache.length() == 3,
+        "original-order prefill commits three positions");
+
+  strata::ring::KvCache trace_cache(8, 2, 4);
+  std::vector<float> trace_out(16);
+  strata::ring::AttentionTrace trace;
+  check(strata::ring::attention_forward(
+            c, q.data(), k.data(), v.data(), 1, 0, qw, kw, trace_cache,
+            trace_out.data(), err, &trace),
+        "single-token attention trace succeeds");
+  check(trace.n_heads == 4 && trace.n_head_kv == 2 && trace.head_dim == 4 &&
+            trace.n_keys == 1 &&
+            trace.raw_q.size() == 16 && trace.raw_k.size() == 8 &&
+            trace.normalized_q.size() == 16 &&
+            trace.rotated_k.size() == 8 && trace.cache_k.size() == 8 &&
+            trace.cache_v.size() == 8 && trace.qk_dots.size() == 4 &&
+            trace.scores.size() == 4 &&
+            trace.probabilities.size() == 4 && trace.output.size() == 16,
+        "trace reports documented tensor shapes");
+  bool trace_probs = true;
+  for (int h = 0; h < 4; ++h)
+    trace_probs &= near_abs(trace.probabilities[size_t(h)], 1.0f);
+  check(trace_probs, "trace probabilities are normalized");
+  check(strata::ring::attention_forward(
+            c, q.data() + 16, k.data() + 8, v.data() + 8, 1, 1, qw, kw,
+            trace_cache, trace_out.data(), err, &trace),
+        "default trace cache replay succeeds");
+  trace_probs = true;
+  for (int h = 0; h < 4; ++h) {
+    float sum = 0.0f;
+    for (int64_t j = 0; j < trace.n_keys; ++j)
+      sum += trace.probabilities[size_t(h) * size_t(trace.n_keys) + size_t(j)];
+    trace_probs &= near_abs(sum, 1.0f);
+  }
+  check(trace_probs, "default trace probabilities sum to one");
+  strata::ring::KvCache divide_cache(8, 2, 4);
+  std::vector<float> divide_out(16);
+  check(strata::ring::attention_forward_order(
+            c, q.data(), k.data(), v.data(), 1, 0, qw, kw, divide_cache,
+            divide_out.data(), err,
+            strata::ring::AttentionValueOrder::NormalizeWeightsFirst, nullptr,
+            strata::ring::AttentionScoreScale::DivideBySqrt),
+        "original divide-by-sqrt score scale succeeds");
+  strata::ring::AttentionTrace rejected_trace;
+  std::vector<float> rejected_out(q.size());
+  check(!strata::ring::attention_forward(
+            c, q.data(), k.data(), v.data(), nt, 0, qw, kw, trace_cache,
+            rejected_out.data(), err, &rejected_trace) &&
+            err.find("single-token") != std::string::npos &&
+            rejected_trace.output.empty(),
+        "multi-token trace request fails closed");
 
   strata::ring::KvCache old(8, 2, 4);
   std::vector<float> ignored(got.size());
@@ -300,6 +380,13 @@ int main() {
                                          nullptr, invalid, invout.data(), err),
         "invalid GQA rejected");
   check(invalid.length() == 0, "invalid geometry leaves empty cache");
+  strata::ring::AttentionConfig unsupported = one;
+  unsupported.original_rope_frequency = true;
+  unsupported.rope_dim = 2;
+  check(!strata::ring::attention_forward(
+            unsupported, fq, fk, fv, 1, 0, nullptr, nullptr, single, so, err) &&
+            err.find("original Ring RoPE frequency") != std::string::npos,
+        "original RoPE mode rejects unsupported geometry");
   bool overflow_rejected = false;
   try {
     strata::ring::KvCache impossible(std::numeric_limits<int64_t>::max(), 2, 2);
@@ -307,6 +394,47 @@ int main() {
     overflow_rejected = true;
   }
   check(overflow_rejected, "KV allocation overflow rejected");
+  // Pre-normalized Q/K must be equivalent to the ordinary path with
+  // nontrivial per-dimension gamma, and must not normalize a second time.
+  strata::ring::AttentionConfig pre_cfg = one;
+  pre_cfg.n_head = 2; pre_cfg.n_head_kv = 1; pre_cfg.head_dim = 4;
+  pre_cfg.rope_dim = 2; pre_cfg.rope_theta = 100.0f;
+  const float pre_q[] = {1.2f, -0.7f, 2.1f, 0.4f, -0.3f, 1.7f, 0.8f, -2.2f};
+  const float pre_k[] = {0.9f, -1.4f, 0.6f, 2.0f};
+  const float pre_v[] = {1.0f, 2.0f, -1.0f, 0.5f};
+  const float pre_qw[] = {0.7f, 1.3f, -0.8f, 1.1f};
+  const float pre_kw[] = {1.4f, -0.6f, 0.9f, 1.2f};
+  auto manual_norm = [](const float *x, float *y, int n, const float *w) {
+    float ss = 0.0f;
+    for (int i = 0; i < n; ++i) ss += x[i] * x[i];
+    const float inv = 1.0f / std::sqrt(ss / float(n) + 1e-6f);
+    for (int i = 0; i < n; ++i) y[i] = x[i] * inv * w[i];
+  };
+  float pre_qn[8], pre_kn[4];
+  manual_norm(pre_q, pre_qn, 4, pre_qw);
+  manual_norm(pre_q + 4, pre_qn + 4, 4, pre_qw);
+  manual_norm(pre_k, pre_kn, 4, pre_kw);
+  strata::ring::KvCache ordinary_cache(2, 1, 4), normalized_cache2(2, 1, 4);
+  float ordinary_out[8] = {}, normalized_out[8] = {};
+  strata::ring::AttentionTrace ordinary_trace, normalized_trace;
+  std::string pre_err;
+  const bool ordinary_ok = strata::ring::attention_forward_order(
+      pre_cfg, pre_q, pre_k, pre_v, 1, 0, pre_qw, pre_kw, ordinary_cache,
+      ordinary_out, pre_err, strata::ring::AttentionValueOrder::AccumulateUnnormalized,
+      &ordinary_trace);
+  const bool normalized_ok = strata::ring::attention_forward_order(
+      pre_cfg, pre_qn, pre_kn, pre_v, 1, 0, nullptr, nullptr,
+      normalized_cache2, normalized_out, pre_err,
+      strata::ring::AttentionValueOrder::AccumulateUnnormalized,
+      &normalized_trace, strata::ring::AttentionScoreScale::ReciprocalSqrt,
+      true);
+  bool pre_same = ordinary_ok && normalized_ok;
+  for (int i = 0; i < 8; ++i) pre_same &= bits(ordinary_out[i]) == bits(normalized_out[i]);
+  for (size_t i = 0; i < ordinary_trace.normalized_q.size() && i < normalized_trace.normalized_q.size(); ++i)
+    pre_same &= bits(ordinary_trace.normalized_q[i]) == bits(normalized_trace.normalized_q[i]);
+  for (size_t i = 0; i < ordinary_trace.normalized_k.size() && i < normalized_trace.normalized_k.size(); ++i)
+    pre_same &= bits(ordinary_trace.normalized_k[i]) == bits(normalized_trace.normalized_k[i]);
+  check(pre_same, "pre-normalized Q/K skips duplicate RMSNorm bit exactly");
   std::printf("%s\n", fails ? "FAIL" : "PASS");
   return fails ? 1 : 0;
 }

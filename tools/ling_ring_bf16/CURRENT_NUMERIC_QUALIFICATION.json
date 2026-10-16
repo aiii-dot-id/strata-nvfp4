@@ -1,0 +1,162 @@
+{
+  "all_objectives_complete": false,
+  "attribution": "AI Identity Incorported <james@aiii.id>",
+  "branch": "ling-ring-bf16",
+  "checkpoint_weights_modified": false,
+  "date_utc": "2026-10-16",
+  "defaults_changed": false,
+  "device": "dev8 NVIDIA RTX 4070 Ti sm_89",
+  "final_source_readmission": {
+    "path": "/work/AI/experiments/ring-final-source-readmission-20261016-r1/FINAL_SOURCE_READMISSION.json",
+    "sha256": "74611230ad9c6ebb15acd07c49a929a1e9c4770529f276ed0caf961a6420eba4",
+    "size": 2248
+  },
+  "gates": {
+    "hidden_logits": "abs(candidate-reference) <= 0.001 + 0.001 * abs(reference)",
+    "ordered_route_ids": "exact",
+    "route_weights": "abs(candidate-reference) <= 1e-5 + 1e-4 * abs(reference)",
+    "tolerances_changed": false,
+    "top1": "exact"
+  },
+  "ling": {
+    "default_control_trace_files_bitwise": 27,
+    "fresh_195_trace": {
+      "ordered_mismatches": 29,
+      "ordered_routes": 4485,
+      "strict_pass": false,
+      "top1_exact": true
+    },
+    "generation_controls": {
+      "scope": "development controls, including one stopping control",
+      "strict_passed": 6,
+      "strict_total": 7
+    },
+    "inventory": {
+      "path": "/work/AI/experiments/ling-parity-summary-20261016.json",
+      "sha256": "2594c1d730ba70158cddfc447b74606fc179805be9a36fbc865395b643282a46",
+      "size": 13235
+    },
+    "negative_reproduction_native_trace_files_bitwise": 27,
+    "original_358_trace": {
+      "ordered_mismatches": 0,
+      "ordered_routes": 8234,
+      "strict_pass": true,
+      "top1_exact": true
+    },
+    "profile": {
+      "matmul": "fp32-cublas",
+      "rms_mode": "torch-cuda-order"
+    },
+    "status": "partial"
+  },
+  "next_discriminator": "Earliest same-input upstream CUDA-operator difference before fresh Ling position46/layer13 expert-set change; Ring hidden/route-weight rounding remains unresolved.",
+  "promotion": false,
+  "quantized": false,
+  "repository": "/work/AI/src/strata-ling-ring-bf16",
+  "ring": {
+    "cuda_rms_1031_and_source_ordered_1031": "not_run_after_short_gate_failure",
+    "cuda_rms_173": {
+      "ordered_mismatches": 1,
+      "strict_pass": false
+    },
+    "cuda_router_1031": {
+      "ordered_mismatches": 0,
+      "ordered_routes": 19589,
+      "strict_pass": false,
+      "top1_exact": true
+    },
+    "default_control_trace_files_bitwise": 23,
+    "frequency_only_failed_positions": [
+      1031
+    ],
+    "frequency_only_passed_positions": [
+      173,
+      375,
+      519
+    ],
+    "inventory": {
+      "path": "/work/AI/experiments/ring-parity-summary-20261016.json",
+      "sha256": "87b874338954de956d1470a7140f61f849cd81660b2dcd5c4bdf7169fa4dc146",
+      "size": 19381
+    },
+    "isolated_repair": "FP32 RoPE inverse-frequency metadata index2",
+    "source_ordered_fp32_173": {
+      "ordered_mismatches": 0,
+      "strict_pass": false,
+      "top1_exact": true
+    },
+    "status": "partial"
+  },
+  "schema": "strata-ling-ring-numeric-qualification-v1",
+  "scope": "Bounded cached-original CUDA parity; no capability, training, performance or production qualification claim.",
+  "selected_evidence": [
+    {
+      "path": "/work/AI/experiments/ring-torch-qualification-20261016-r2/1031-bf16-gemv/RESULT.json",
+      "sha256": "3ad6d7e08fc4ec3c5ecc3bf81254c51928bc725c5b148d4b5ccd941dd02e9561",
+      "size": 1309
+    },
+    {
+      "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/default173-bf16-gemv/RESULT.json",
+      "sha256": "2576a9b9db5c363f38f18d6a466f57a950477a91daf9e42b30a8603ec4bd5e09",
+      "size": 1083
+    },
+    {
+      "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/173-bf16-gemv/RESULT.json",
+      "sha256": "ad5a2cfc51e7da3eee3c8ea96429fbfc0474f0292b29fc959ffd8ecc5c27a0a2",
+      "size": 1694
+    },
+    {
+      "path": "/work/AI/experiments/ring-matched-source-qualification-20261016-r1/173-fp32-cublas/RESULT.json",
+      "sha256": "90adb42e1615afdb28982c2f7d2b44cb14568594f928973463b154dea100aecc",
+      "size": 1416
+    },
+    {
+      "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/358/RESULT.json",
+      "sha256": "3275d282a954487993baf01b07340ae2a4a6f0a0d1d5c4c569a2e7ccb2d8656a",
+      "size": 1060
+    },
+    {
+      "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/195/RESULT.json",
+      "sha256": "c8864daca44f8eee685709db1a58aeb4f9a640167ef7eff22318acea152242d8",
+      "size": 5948
+    },
+    {
+      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/gate-replay/result.json",
+      "sha256": "ca3239810f58cfaccd12519660ed4de4258980b8ac687410bc56eecde5aae446",
+      "size": 33013
+    },
+    {
+      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/norm-replay-cuda.json",
+      "sha256": "3072ceb1f17e93f70770d6a6a2ab8c761a513cf54c6976daa530e331e3339a74",
+      "size": 22972
+    },
+    {
+      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/kda-attention-replay-cuda.json",
+      "sha256": "4dba68a9c79e3120aea3dbd2f885c23de582dce1c76d112e60b997322a5675ea",
+      "size": 62805
+    },
+    {
+      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/answer-control.json",
+      "sha256": "adbffa14ac2fc86aa1359338a1504d4f1dcb76f4819b4251a9b51373d706f64c",
+      "size": 6174
+    }
+  ],
+  "serving_interrupted": false,
+  "starting_commit": "a2c762ab02659c6b65a27721dd038fc4cfda655a",
+  "status": "partial_strict_qualification_not_complete",
+  "tests": {
+    "ling_ctest_passed": 2,
+    "no_torch_build_and_cpu_rejection": {
+      "path": "/work/AI/experiments/ring-native-rms-guard-build/NO_TORCH_BUILD_RECEIPT.json",
+      "sha256": "07e080a827c2e6f2742f176ba9597e52ae68c4152a1439a3630d2cc24f438004",
+      "size": 3557
+    },
+    "python_log": {
+      "path": "/work/AI/experiments/full-bf16-toolchain-20261016.log",
+      "sha256": "5c0885e82fa1137cfc213c1f8eae098632f458a5415ed140139ac65b56ed28ba",
+      "size": 1565
+    },
+    "python_passed": 183,
+    "ring_ctest_passed": 7
+  }
+}

@@ -2,6 +2,15 @@
 
 AI Identity Incorported <james@aiii.id>
 
+Current readmission: the opt-in FP32-cuBLAS plus CUDA-order RMS profile
+repairs the original 358-position thinking trace and passes six of seven
+generation controls. A fresh 195-position equation trace fails 29 routing rows
+despite a correct answer and exact top-token choices. See
+[NUMERIC_PARITY_DIAGNOSTICS.md](NUMERIC_PARITY_DIAGNOSTICS.md) and
+[CURRENT_NUMERIC_QUALIFICATION.json](CURRENT_NUMERIC_QUALIFICATION.json).
+The sections below preserve historical default-path and reference-protocol
+measurements; they are not overwritten by the new profile's bounded passes.
+
 Measured on 2026-10-16 on an NVIDIA RTX 4070 Ti (12 GiB, sm_89), with the
 original Ling-3.0-tiny checkpoint. This record covers bounded four-token and 64/65-token forward
 evidence plus five frozen tokenizer/template generation cases. It remains partial bounded

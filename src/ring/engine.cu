@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <strata/kernels/bf16_gemv.hpp>
@@ -22,6 +23,10 @@
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
 #include <vector>
+#ifdef STRATA_TORCH_ROUTER
+#include "router.hpp"
+#include "rms.hpp"
+#endif
 
 namespace sr = strata::ring;
 static volatile std::sig_atomic_t cancelled = 0;
@@ -114,6 +119,13 @@ struct CudaBackend final : sr::ExpertCache::Backend {
   }
 };
 enum class MatmulBackend { Bf16Gemv, Fp32Cublas };
+
+enum class RouterBackend { Native, TorchCuda };
+static RouterBackend parse_router_backend(const std::string &v) { if(v=="native") return RouterBackend::Native; if(v=="torch-cuda") return RouterBackend::TorchCuda; throw std::invalid_argument("router backend must be native or torch-cuda"); }
+static const char *router_backend_name(RouterBackend b) { return b==RouterBackend::TorchCuda ? "torch-cuda" : "native"; }
+enum class RmsBackend { Native, TorchCuda };
+static RmsBackend parse_rms_backend(const std::string &v) { if(v=="native") return RmsBackend::Native; if(v=="torch-cuda") return RmsBackend::TorchCuda; throw std::invalid_argument("rms mode must be native or torch-cuda"); }
+static const char *rms_backend_name(RmsBackend b) { return b==RmsBackend::TorchCuda ? "torch-cuda" : "native"; }
 
 static const char *matmul_backend_name(MatmulBackend backend) {
   return backend == MatmulBackend::Fp32Cublas ? "fp32-cublas" : "bf16-gemv";
@@ -278,7 +290,8 @@ static void write_route_probe(const std::filesystem::path &path,
                               const std::vector<float> &sigmoid_scores,
                               const std::vector<float> &expert_bias,
                               const std::vector<float> &bias_corrected,
-                              const sr::RoutingResult &selected) {
+                              const sr::RoutingResult &selected,
+                              const std::map<std::string, std::vector<float>> &stages) {
   if (gate_input.size() != 2048 || router_logits.size() != 256 ||
       sigmoid_scores.size() != 256 || expert_bias.size() != 256 ||
       bias_corrected.size() != 256 || selected.expert_ids.size() != 8 ||
@@ -306,7 +319,15 @@ static void write_route_probe(const std::filesystem::path &path,
   }
   out << "],\"selected_weights\":";
   write_float_array(out, selected.weights);
-  out << "}\n";
+  out << ",\"operator_stages\":{";
+  bool first = true;
+  for (const auto &entry : stages) {
+    if (!first) out << ',';
+    first = false;
+    out << '\"' << entry.first << "\":";
+    write_float_array(out, entry.second);
+  }
+  out << "}}\n";
   if (!out)
     throw std::runtime_error("route probe output write failed");
 }
@@ -317,7 +338,7 @@ int main(int argc, char **argv) {
           "usage: strata_ring_bf16 ROOT MANIFEST "
           "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
           "[--generate N --eos CSV] [--logits-mode all|last] "
-          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas]");
+          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-order native|normalized-first] [--attention-scale native|divide]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
       throw std::runtime_error("refusing existing output directory");
@@ -333,6 +354,9 @@ int main(int argc, char **argv) {
     std::vector<int> eos;
     std::string logits_mode = "all";
     MatmulBackend matmul_backend = MatmulBackend::Bf16Gemv;
+    RouterBackend router_backend = RouterBackend::Native;
+    RmsBackend rms_backend = RmsBackend::Native;
+    std::string attention_order = "native", attention_scale = "native", rope_frequency = "native";
     bool has_route_probe = false;
     RouteProbeSpec route_probe{};
     std::vector<std::string> options;
@@ -349,12 +373,31 @@ int main(int argc, char **argv) {
         logits_mode = argv[i + 1];
       else if (option == "--matmul")
         matmul_backend = parse_matmul_backend(argv[i + 1]);
+      else if (option == "--router")
+        router_backend = parse_router_backend(argv[i + 1]);
+      else if (option == "--rms-mode")
+        rms_backend = parse_rms_backend(argv[i + 1]);
+      else if (option == "--rope-frequency")
+        rope_frequency = argv[i + 1];
+      else if (option == "--attention-scale")
+        attention_scale = argv[i + 1];
+      else if (option == "--attention-order")
+        attention_order = argv[i + 1];
       else if (option == "--route-probe") {
         route_probe = parse_route_probe(argv[i + 1]);
         has_route_probe = true;
       } else
         throw std::invalid_argument("unknown option");
     }
+#ifndef STRATA_TORCH_ROUTER
+    if (rms_backend == RmsBackend::TorchCuda) throw std::runtime_error("torch-cuda RMS backend is unavailable in this build");
+#endif
+    if (rope_frequency != "native" && rope_frequency != "original")
+      throw std::invalid_argument("rope frequency must be native or original");
+    if (attention_scale != "native" && attention_scale != "divide")
+      throw std::invalid_argument("attention scale must be native or divide");
+    if (attention_order != "native" && attention_order != "normalized-first")
+      throw std::invalid_argument("attention order must be native or normalized-first");
     if (logits_mode != "all" && logits_mode != "last")
       throw std::invalid_argument("logits mode must be all or last");
     if (generate && logits_mode != "all")
@@ -379,12 +422,21 @@ int main(int argc, char **argv) {
       throw std::runtime_error("this target is qualified only for sm_89");
     size_t free = 0, total = 0;
     check(cudaMemGetInfo(&free, &total));
+    int cuda_runtime_version = 0; check(cudaRuntimeGetVersion(&cuda_runtime_version));
     const size_t budget = cache_mib * 1024 * 1024;
     if (free < budget + Matvec::workspace_bytes(matmul_backend) +
                     size_t(512) * 1024 * 1024)
       throw std::runtime_error(
           "insufficient free GPU memory; no process will be stopped");
     Matvec mv(matmul_backend);
+#ifdef STRATA_TORCH_ROUTER
+    std::unique_ptr<strata::torch_router::Router> torch_router;
+    std::unique_ptr<strata::torch_router::Rms> torch_rms;
+    if (router_backend == RouterBackend::TorchCuda) torch_router = std::make_unique<strata::torch_router::Router>(256, 8, 4, 8, 2.5f, "cuda");
+    if (rms_backend == RmsBackend::TorchCuda) torch_rms = std::make_unique<strata::torch_router::Rms>("cuda");
+#else
+    if (router_backend == RouterBackend::TorchCuda) throw std::runtime_error("torch-cuda router backend is unavailable in this build");
+#endif
     auto backend = std::make_shared<CudaBackend>();
     sr::ExpertCache cache({budget, 20, 256}, backend);
     sr::ExpertCache::Provider provider = [&](const sr::ExpertKey &key,
@@ -418,15 +470,28 @@ int main(int argc, char **argv) {
       kv.emplace_back(generation.kv_capacity(), 4, 128);
     sr::AttentionConfig attention;
     attention.rope_dim = 64;
+    attention.original_rope_frequency = rope_frequency == "original";
     const sr::RouterConfig routing{256, 8, 4, 8, 2.5f};
     std::filesystem::create_directories(output);
     std::ofstream routes(output / "routes.tsv");
     routes << std::setprecision(9);
     const auto start = std::chrono::steady_clock::now();
     bool route_probe_found = false;
+    auto apply_norm = [&](const std::vector<float> &x, const sr::TensorView &weight) {
+      if (rms_backend == RmsBackend::Native) return norm(x, weight);
+#ifdef STRATA_TORCH_ROUTER
+      shape(weight, {x.size()});
+      std::vector<float> w = floats(weight), out; std::string e;
+      if (!torch_rms->normalize(x.data(), w.data(), 1, x.size(), attention.rms_eps, out, e)) throw std::runtime_error(e);
+      return out;
+#else
+      throw std::runtime_error("torch-cuda RMS backend is unavailable in this build");
+#endif
+    };
     std::vector<float> probe_gate_input, probe_router_logits, probe_sigmoid,
         probe_bias, probe_corrected;
     sr::RoutingResult probe_selected;
+    std::map<std::string, std::vector<float>> probe_stages;
     for (size_t pos = 0; pos < tokens.size(); ++pos) {
       check_cancelled();
       std::vector<float> h(2048);
@@ -439,24 +504,62 @@ int main(int argc, char **argv) {
       for (int layer = 0; layer < 20; ++layer) {
         check_cancelled();
         const std::string pre = "model.layers." + std::to_string(layer) + ".";
-        auto a = norm(h, store.tensor(pre + "input_layernorm.weight"));
+        const bool capture_operator = has_route_probe && route_probe.position == pos && route_probe.layer == static_cast<size_t>(layer);
+        if (capture_operator) probe_stages["input_hidden"] = h;
+        auto a = apply_norm(h, store.tensor(pre + "input_layernorm.weight"));
+        if (capture_operator) probe_stages["input_normalized"] = a;
         const auto &qkv_weight =
             store.tensor(pre + "attention.query_key_value.weight");
         shape(qkv_weight, {3072, 2048});
         auto qkv = mv.apply(qkv_weight, a);
-        auto qw =
-            floats(store.tensor(pre + "attention.query_layernorm.weight"));
-        auto kw = floats(store.tensor(pre + "attention.key_layernorm.weight"));
+        if (capture_operator) probe_stages["qkv_raw"] = qkv;
+        const auto &qwt = store.tensor(pre + "attention.query_layernorm.weight");
+        const auto &kwt = store.tensor(pre + "attention.key_layernorm.weight");
+        shape(qwt, {128}); shape(kwt, {128});
+        auto qw = floats(qwt);
+        auto kw = floats(kwt);
+        std::vector<float> pre_q, pre_k;
+        const float *qptr = qkv.data(), *kptr = qkv.data() + 2048;
+#ifdef STRATA_TORCH_ROUTER
+        if (rms_backend == RmsBackend::TorchCuda) {
+          std::string e;
+          if (!torch_rms->normalize(qptr, qw.data(), 16, 128, attention.rms_eps, pre_q, e) ||
+              !torch_rms->normalize(kptr, kw.data(), 4, 128, attention.rms_eps, pre_k, e)) throw std::runtime_error(e);
+          qptr = pre_q.data(); kptr = pre_k.data();
+        }
+#else
+        if (rms_backend == RmsBackend::TorchCuda) throw std::runtime_error("torch-cuda RMS backend is unavailable in this build");
+#endif
         if (qw.size() != 128 || kw.size() != 128)
           throw std::runtime_error("QK norm geometry");
         std::vector<float> context(2048);
         std::string error;
-        if (!sr::attention_forward(attention, qkv.data(), qkv.data() + 2048,
+        sr::AttentionTrace attention_trace;
+        const auto value_order = attention_order == "normalized-first" ? sr::AttentionValueOrder::NormalizeWeightsFirst : sr::AttentionValueOrder::AccumulateUnnormalized;
+        if (!sr::attention_forward_order(attention, qptr, kptr,
                                    qkv.data() + 2560, 1, pos, qw.data(),
-                                   kw.data(), kv[layer], context.data(), error))
+                                   kw.data(), kv[layer], context.data(), error,
+                                   value_order, capture_operator ? &attention_trace : nullptr,
+                                   attention_scale == "divide" ? sr::AttentionScoreScale::DivideBySqrt : sr::AttentionScoreScale::ReciprocalSqrt,
+                                   rms_backend == RmsBackend::TorchCuda))
           throw std::runtime_error(error);
-        add(h, mv.apply(store.tensor(pre + "attention.dense.weight"), context));
-        auto x = norm(h, store.tensor(pre + "post_attention_layernorm.weight"));
+        auto projected = mv.apply(store.tensor(pre + "attention.dense.weight"), context);
+        if (capture_operator) {
+          probe_stages["query_normalized"] = attention_trace.normalized_q;
+          probe_stages["key_normalized"] = attention_trace.normalized_k;
+          probe_stages["query_rotated"] = attention_trace.rotated_q;
+          probe_stages["key_rotated"] = attention_trace.rotated_k;
+          probe_stages["cache_k"] = attention_trace.cache_k;
+          probe_stages["cache_v"] = attention_trace.cache_v;
+          probe_stages["attention_scores"] = attention_trace.scores;
+          probe_stages["attention_probabilities"] = attention_trace.probabilities;
+          probe_stages["attention_context"] = context;
+          probe_stages["attention_projected"] = projected;
+        }
+        add(h, projected);
+        if (capture_operator) probe_stages["post_attention_hidden"] = h;
+        auto x = apply_norm(h, store.tensor(pre + "post_attention_layernorm.weight"));
+        if (capture_operator) probe_stages["gate_input"] = x;
         if (layer == 0)
           add(h, mlp(mv, store, pre + "mlp.", x));
         else {
@@ -464,7 +567,16 @@ int main(int argc, char **argv) {
           auto bias = floats(store.tensor(pre + "mlp.gate.expert_bias"));
           if (logits.size() != 256 || bias.size() != 256)
             throw std::runtime_error("router geometry");
-          auto selected = sr::route(logits.data(), bias.data(), 256, routing);
+          sr::RoutingResult selected;
+          std::vector<float> backend_scores, backend_corrected;
+#ifdef STRATA_TORCH_ROUTER
+          if (router_backend == RouterBackend::TorchCuda) {
+            std::string router_error;
+            if (!torch_router->route(logits.data(), bias.data(), 256, selected.expert_ids, selected.weights, backend_scores, backend_corrected, router_error))
+              throw std::runtime_error(router_error);
+          } else
+#endif
+            selected = sr::route(logits.data(), bias.data(), 256, routing);
           if (has_route_probe && route_probe.position == pos &&
               route_probe.layer == static_cast<size_t>(layer)) {
             route_probe_found = true;
@@ -474,8 +586,11 @@ int main(int argc, char **argv) {
             probe_sigmoid.resize(logits.size());
             probe_corrected.resize(logits.size());
             for (size_t i = 0; i < logits.size(); ++i) {
-              probe_sigmoid[i] = router_sigmoid(logits[i]);
-              probe_corrected[i] = probe_sigmoid[i] + bias[i];
+#ifdef STRATA_TORCH_ROUTER
+              if (router_backend == RouterBackend::TorchCuda) { probe_sigmoid[i] = backend_scores[i]; probe_corrected[i] = backend_corrected[i]; }
+              else
+#endif
+              { probe_sigmoid[i] = router_sigmoid(logits[i]); probe_corrected[i] = probe_sigmoid[i] + bias[i]; }
             }
             probe_selected = selected;
           }
@@ -505,9 +620,10 @@ int main(int argc, char **argv) {
           add(mixed, mlp(mv, store, pre + "mlp.shared_experts.", x));
           add(h, mixed);
         }
+        if (capture_operator) probe_stages["layer_output"] = h;
         write_row(output / ("layer-" + std::to_string(layer) + ".f32"), h);
       }
-      h = norm(h, store.tensor("model.norm.weight"));
+      h = apply_norm(h, store.tensor("model.norm.weight"));
       write_row(output / "final-hidden.f32", h);
       if (logits_mode == "all" || pos + 1 == tokens.size()) {
         auto logits = mv.apply(store.tensor("lm_head.weight"), h);
@@ -526,7 +642,7 @@ int main(int argc, char **argv) {
         throw std::runtime_error("route probe position was not evaluated");
       write_route_probe(output / "route-probe.json", route_probe,
                         probe_gate_input, probe_router_logits, probe_sigmoid,
-                        probe_bias, probe_corrected, probe_selected);
+                        probe_bias, probe_corrected, probe_selected, probe_stages);
     }
     if (generate) {
       std::ofstream generated(output / "generation.json");
@@ -568,9 +684,12 @@ int main(int argc, char **argv) {
             << ",\"cache_hits\":" << stats.hits
             << ",\"cache_misses\":" << stats.misses
             << ",\"cache_evictions\":" << stats.evictions
+            << ",\"rope_frequency\":\"" << rope_frequency << "\""
+            << ",\"attention_value_order\":\"" << attention_order << "\""
+            << ",\"attention_score_scale\":\"" << attention_scale << "\""
             << ",\"matmul_backend\":\""
             << matmul_backend_name(matmul_backend)
-            << "\",\"matmul_fp32_weight_scratch_bytes\":"
+            << "\",\"router_backend\":\"" << router_backend_name(router_backend) << "\",\"rms_backend\":\"" << rms_backend_name(rms_backend) << "\",\"cuda_runtime_version\":" << cuda_runtime_version << ",\"matmul_fp32_weight_scratch_bytes\":"
             << Matvec::fp32_scratch_bytes(matmul_backend)
             << ",\"workspace_bytes\":"
             << Matvec::workspace_bytes(matmul_backend)

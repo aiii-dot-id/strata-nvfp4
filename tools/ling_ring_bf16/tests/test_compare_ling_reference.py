@@ -66,6 +66,52 @@ def test_ling_comparison_passes(tmp_path):
     assert result["top1_exact"] is True
 
 
+def _add_probe(cand, position=3, layer=2):
+    value = {"position": position, "layer": layer,
+             "input_hidden": [0.0] * c.HIDDEN, "post_attention_hidden": [0.0] * c.HIDDEN,
+             "gate_input": [0.0] * c.HIDDEN, "router_logits": [0.0] * c.EXPERTS,
+             "sigmoid_scores": [0.5] * c.EXPERTS, "expert_bias": [0.0] * c.EXPERTS,
+             "bias_corrected_scores": [0.5] * c.EXPERTS,
+             "selected_expert_ids": list(range(c.TOPK)), "selected_weights": [0.1] * c.TOPK}
+    (cand / "route-probe.json").write_text(json.dumps(value))
+    provenance = json.loads((cand / "provenance.json").read_text())
+    provenance["route_probe"] = {"position": position, "layer": layer, "output": "route-probe.json"}
+    provenance["native_outputs"]["route-probe.json"] = _meta(cand / "route-probe.json")
+    (cand / "provenance.json").write_text(json.dumps(provenance))
+
+
+def test_bound_route_probe_is_accepted_and_hashed(tmp_path):
+    ref, cand = fixture(tmp_path)
+    _add_probe(cand)
+    result = c.compare(ref, cand, tmp_path / "probe")
+    assert result["passed"] is True
+
+
+def test_reference_route_probe_hash_is_optional_but_bound(tmp_path):
+    ref, cand = fixture(tmp_path)
+    value = {"position": 3, "layer": 2,
+             "input_hidden": [0.0] * c.HIDDEN, "post_attention_hidden": [0.0] * c.HIDDEN,
+             "gate_input": [0.0] * c.HIDDEN, "router_logits": [0.0] * c.EXPERTS,
+             "sigmoid_scores": [0.5] * c.EXPERTS, "expert_bias": [0.0] * c.EXPERTS,
+             "bias_corrected_scores": [0.5] * c.EXPERTS,
+             "selected_expert_ids": list(range(c.TOPK)), "selected_weights": [0.1] * c.TOPK}
+    probe = ref / "route-probe.json"
+    probe.write_text(json.dumps(value))
+    report = json.loads((ref / "report.json").read_text())
+    report["route_probe"] = {"position": 3, "layer": 2, "output": "route-probe.json"}
+    report["outputs"]["route-probe.json"] = _meta(probe, "bytes")
+    (ref / "report.json").write_text(json.dumps(report))
+    result = c.compare(ref, cand, tmp_path / "reference-probe")
+    assert result["passed"] is True
+
+
+def test_unbound_route_probe_is_rejected(tmp_path):
+    ref, cand = fixture(tmp_path)
+    (cand / "route-probe.json").write_text("{}")
+    with pytest.raises(c.ComparisonError, match="not bound"):
+        c.compare(ref, cand, tmp_path / "unbound")
+
+
 def test_route_mismatch_retains_numeric_diagnostics(tmp_path):
     ref, cand = fixture(tmp_path)
     lines = (cand / "routes.tsv").read_text().splitlines()

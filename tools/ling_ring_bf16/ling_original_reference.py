@@ -68,6 +68,7 @@ class SafeTensorIndex:
 def write_report(report, out):
  out=Path(out); out.mkdir(parents=True,exist_ok=True)
  names=['final_hidden.fp32','logits.fp32','hidden_layers.fp32','layers.json','router_meta.json']
+ if (out/'route-probe.json').is_file(): names.append('route-probe.json')
  report['outputs']={n:{'bytes':(out/n).stat().st_size,'sha256':sha(out/n)} for n in names}
  (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 
@@ -104,6 +105,18 @@ def validate_cached_trace(layer_rows,route_rows,tokens,layers):
   if len(route_rows[ln]['router_ids'])!=expected or len(route_rows[ln]['router_weights'])!=expected: raise ReferenceError(f'cached layer {ln} route count mismatch')
  return True
 
+def _parse_route_probe(text, token_count, layer_count):
+ if not isinstance(text, str) or text.count(',') != 1:
+  raise ReferenceError('route_probe must be POS,LAYER')
+ try: pos, layer = (int(x, 10) for x in text.split(','))
+ except (TypeError, ValueError) as exc:
+  raise ReferenceError('route_probe must be POS,LAYER') from exc
+ if pos < 0 or pos >= token_count:
+  raise ReferenceError('route_probe position exceeds evaluated tokens')
+ if layer < 1 or layer >= layer_count:
+  raise ReferenceError('route_probe layer must be a sparse layer')
+ return pos, layer
+
 def run_cached(a,root,source,out,torch,mod,cfg,idx,pins,srcpins,dev,started,toks):
  if getattr(a,'logits_mode','all') != 'all': raise ReferenceError('cached decoding requires --logits-mode all')
  from transformers.cache_utils import DynamicCache
@@ -111,6 +124,9 @@ def run_cached(a,root,source,out,torch,mod,cfg,idx,pins,srcpins,dev,started,toks
  embeddings=idx.raw(embed_name,torch,dev)
  token_hiddens=[embeddings[torch.tensor([[tok]],dtype=torch.long,device=dev)].clone() for tok in toks]; del embeddings; gc.collect()
  route_rows=[{'layer':ln,'router_ids':[],'router_weights':[]} for ln in range(cfg.num_hidden_layers)]
+ parsed_probe = getattr(a, 'route_probe', None)
+ parsed_probe = _parse_route_probe(parsed_probe, len(toks), cfg.num_hidden_layers) if parsed_probe is not None else None
+ route_probe_data = [None]
  layer_rows=[[] for _ in range(cfg.num_hidden_layers)]; rotary=mod.BailingMoeV3RotaryEmbedding(cfg).to(dev)
  with torch.no_grad():
   for ln in range(cfg.num_hidden_layers):
@@ -118,20 +134,52 @@ def run_cached(a,root,source,out,torch,mod,cfg,idx,pins,srcpins,dev,started,toks
    with torch.device('meta'): layer=mod.BailingMoeV3DecoderLayer(cfg,ln)
    missing,extra=layer.load_state_dict(state,strict=False,assign=True); layer.eval()
    if missing or extra: raise ReferenceError(f'layer {ln} state mismatch')
-   cache=DynamicCache(); next_hiddens=[]
+   cache=DynamicCache(); next_hiddens=[]; probe_calls=[0]
    for pos_i,hidden in enumerate(token_hiddens):
     position_ids=torch.tensor([[pos_i]],dtype=torch.long,device=dev); cache_position=position_ids.view(-1)
     captured={}; original=None; capture=None
+    probe_hidden=None; post_capture={}; post_handle=None
+    if parsed_probe is not None and pos_i == parsed_probe[0] and ln == parsed_probe[1]:
+     probe_hidden=hidden.detach().float().cpu().reshape(-1).tolist()
+     def capture_post(_module,args):
+      if not args or args[0].numel() != cfg.hidden_size:
+       raise ReferenceError('cached post-attention probe geometry mismatch')
+      post_capture['value']=args[0].detach().float().cpu().reshape(-1).tolist()
+     post_handle=layer.post_attention_layernorm.register_forward_pre_hook(capture_post)
     if hasattr(layer.mlp,'gate'):
      original=layer.mlp.gate.forward
-     def capture(x,_original=original):
-      value=_original(x); captured['ids']=value[0].detach().cpu(); captured['weights']=value[1].detach().float().cpu(); return value
+     def capture(x,_original=original,_layer_no=ln):
+      value=_original(x); captured['ids']=value[0].detach().cpu(); captured['weights']=value[1].detach().float().cpu()
+      if parsed_probe is not None and _layer_no == parsed_probe[1]:
+       flat_x=x.reshape(-1,x.shape[-1]); flat_logits=value[2].reshape(-1,value[2].shape[-1])
+       if flat_x.shape[0] != 1 or probe_calls[0] >= len(toks):
+        raise ReferenceError('cached route probe call geometry mismatch')
+       row=probe_calls[0]; probe_calls[0] += 1
+       if row == parsed_probe[0]:
+        logits_device=flat_logits[0].detach().float(); scores_device=torch.sigmoid(logits_device)
+        bias_device=layer.mlp.gate.expert_bias.detach().float().reshape(-1)
+        corrected_device=scores_device+bias_device
+        route_probe_data[0]={'position':parsed_probe[0],'layer':parsed_probe[1],
+         'score_reconstruction':'torch.sigmoid(router_logits) and bias correction recomputed on the original logits device from the same gate output',
+         'input_hidden':probe_hidden,
+         'post_attention_hidden':post_capture.get('value'),
+         'gate_input':flat_x[0].detach().float().cpu().tolist(),
+         'router_logits':logits_device.cpu().tolist(),
+         'sigmoid_scores':scores_device.cpu().tolist(),
+         'expert_bias':bias_device.cpu().tolist(),
+         'bias_corrected_scores':corrected_device.cpu().tolist(),
+         'selected_expert_ids':value[0].reshape(-1,value[0].shape[-1])[0].detach().cpu().tolist(),
+         'selected_weights':value[1].reshape(-1,value[1].shape[-1])[0].detach().float().cpu().tolist()}
+      return value
      layer.mlp.gate.forward=capture
     try:
      pos_emb=rotary(hidden,position_ids)
      hidden=layer(hidden,attention_mask=None,position_ids=position_ids,cache_position=cache_position,position_embeddings=pos_emb,use_cache=True,past_key_value=cache,output_router_logits=False)[0]
     finally:
      if original is not None: layer.mlp.gate.forward=original
+     if post_handle is not None: post_handle.remove()
+    if parsed_probe is not None and pos_i == parsed_probe[0] and ln == parsed_probe[1] and 'value' not in post_capture:
+     raise ReferenceError('cached post-attention probe was not captured')
     capture=None
     if captured:
      ids=captured['ids'].reshape(-1,8).tolist()[0]; weights=captured['weights'].reshape(-1,8).tolist()[0]; route_rows[ln]['router_ids'].append(ids); route_rows[ln]['router_weights'].append(weights)
@@ -145,11 +193,17 @@ def run_cached(a,root,source,out,torch,mod,cfg,idx,pins,srcpins,dev,started,toks
   lm_head=idx.raw('lm_head.weight',torch,dev); finals=[]; logits_rows=[]
   for hidden in token_hiddens:
    final=norm(hidden); finals.append(final.detach().cpu().float().reshape(-1)); logits_rows.append(torch.matmul(final.float(),lm_head.transpose(0,1).float()).detach().cpu().float().reshape(-1))
-  validate_cached_trace(layer_rows,route_rows,len(toks),cfg.num_hidden_layers); hidden_out=torch.stack(finals).unsqueeze(0); logits=torch.stack(logits_rows).unsqueeze(0); hidden_layers=torch.stack([torch.stack(x) for x in layer_rows])
+  validate_cached_trace(layer_rows,route_rows,len(toks),cfg.num_hidden_layers)
+  if parsed_probe is not None and route_probe_data[0] is None: raise ReferenceError('route probe position was not captured')
+  hidden_out=torch.stack(finals).unsqueeze(0); logits=torch.stack(logits_rows).unsqueeze(0); hidden_layers=torch.stack([torch.stack(x) for x in layer_rows])
  if a.device=='cuda' and torch.cuda.max_memory_reserved()>5*1024**3: raise ReferenceError('CUDA peak reserved exceeds 5 GiB')
  pins2=idx.pin(); srcpins2=pin_source(root,source)
  if pins!=pins2 or srcpins!=srcpins2: raise ReferenceError('checkpoint/source pins changed')
- out.mkdir(parents=True); hidden_out.numpy().tofile(out/'final_hidden.fp32'); logits.numpy().tofile(out/'logits.fp32'); hidden_layers.numpy().tofile(out/'hidden_layers.fp32'); (out/'layers.json').write_text(json.dumps(route_rows)); (out/'router_meta.json').write_text(json.dumps([{'layer':x['layer'],'router_ids':bool(x['router_ids']),'tokens':len(x['router_ids']),'top_k':8 if x['router_ids'] else 0} for x in route_rows],indent=2)); report=build_report(a,cfg,toks,hidden_out,logits,srcpins2,pins2,torch,out,started,'cached',{'cache_type':'DynamicCache','prefill_tokens':0,'decode_tokens':len(toks),'tokenwise':True,'layer_major':True}); write_report(report,out); return report
+ out.mkdir(parents=True); hidden_out.numpy().tofile(out/'final_hidden.fp32'); logits.numpy().tofile(out/'logits.fp32'); hidden_layers.numpy().tofile(out/'hidden_layers.fp32'); (out/'layers.json').write_text(json.dumps(route_rows)); (out/'router_meta.json').write_text(json.dumps([{'layer':x['layer'],'router_ids':bool(x['router_ids']),'tokens':len(x['router_ids']),'top_k':8 if x['router_ids'] else 0} for x in route_rows],indent=2))
+ if route_probe_data[0] is not None: (out/'route-probe.json').write_text(json.dumps(route_probe_data[0],sort_keys=True)+chr(10))
+ report=build_report(a,cfg,toks,hidden_out,logits,srcpins2,pins2,torch,out,started,'cached',{'cache_type':'DynamicCache','prefill_tokens':0,'decode_tokens':len(toks),'tokenwise':True,'layer_major':True})
+ if parsed_probe is not None: report['route_probe']={'position':parsed_probe[0],'layer':parsed_probe[1],'output':'route-probe.json'}
+ write_report(report,out); return report
 
 def run(a):
  import torch
@@ -165,6 +219,7 @@ def run(a):
  toks=[int(x) for x in a.tokens.split(',') if x];
  if not toks or len(toks)>1024 or any(x<0 or x>=cfg.vocab_size for x in toks): raise ReferenceError('tokens must be 1..1024 and in vocabulary')
  idx=SafeTensorIndex(root); pins=idx.pin(); srcpins=pin_source(root,source)
+ if getattr(a,'route_probe',None) is not None and getattr(a,'decoding_mode','full') != 'cached': raise ReferenceError('route probe currently requires cached decoding')
  if getattr(a,'decoding_mode','full')=='cached': return run_cached(a,root,source,out,torch,mod,cfg,idx,pins,srcpins,dev,started,toks)
  ids=torch.tensor([toks],dtype=torch.long,device=dev); hidden=idx.raw('model.embed_tokens.weight',torch,dev)[ids] if 'model.embed_tokens.weight' in idx.weight_map else idx.raw('model.word_embeddings.weight',torch,dev)[ids]
  pos=torch.arange(len(toks),device=dev,dtype=torch.long).unsqueeze(0); causal=torch.triu(torch.full((1,1,len(toks),len(toks)),-float('inf'),device=dev),diagonal=1); rotary=mod.BailingMoeV3RotaryEmbedding(cfg).to(dev); pos_emb=rotary(hidden,pos); hs=[]; layers=[]
@@ -193,7 +248,7 @@ def run(a):
  out.mkdir(parents=True); hidden.detach().cpu().float().numpy().tofile(out/'final_hidden.fp32'); logits.detach().cpu().float().numpy().tofile(out/'logits.fp32'); torch.stack(hs).numpy().tofile(out/'hidden_layers.fp32'); (out/'layers.json').write_text(json.dumps(layers)); router_meta=[{'layer':x['layer'],'router_ids':bool(x['router_ids']),'tokens':len(x['router_ids']),'top_k':8 if x['router_ids'] else 0} for x in layers]; (out/'router_meta.json').write_text(json.dumps(router_meta,indent=2)); report=build_report(a,cfg,toks,hidden,logits,srcpins2,pins2,torch,out,started,'full',{'cache_type':None,'prefill_tokens':len(toks),'chunk_mode':'source-selected'})
  write_report(report,out); return report
 def main():
- p=argparse.ArgumentParser(); p.add_argument('--checkpoint',required=True); p.add_argument('--source',required=True); p.add_argument('--tokens',required=True); p.add_argument('--output',required=True); p.add_argument('--device',choices=['cpu','cuda'],default='cpu'); p.add_argument('--logits-mode',choices=['all','last'],default='all'); p.add_argument('--decoding-mode',choices=['full','cached'],default='full'); a=p.parse_args()
+ p=argparse.ArgumentParser(); p.add_argument('--checkpoint',required=True); p.add_argument('--source',required=True); p.add_argument('--tokens',required=True); p.add_argument('--output',required=True); p.add_argument('--device',choices=['cpu','cuda'],default='cpu'); p.add_argument('--logits-mode',choices=['all','last'],default='all'); p.add_argument('--decoding-mode',choices=['full','cached'],default='full'); p.add_argument('--route-probe',help='capture one cached POS,LAYER router state'); a=p.parse_args()
  try: print(json.dumps(run(a),indent=2))
  except (ReferenceError,OSError,ValueError,RuntimeError) as e: p.error(str(e))
 if __name__=='__main__': main()

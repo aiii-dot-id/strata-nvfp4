@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -148,7 +149,7 @@ def _checkpoint_files(checkpoint: Path) -> tuple[dict, dict]:
     return files, index_data
 
 
-def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
+def _source_files(checkpoint: Path, repo: Path, router: str = "native", executable: Path | None = None, rms_mode: str = "native") -> tuple[dict, dict]:
     original = {}
     for name in ("modeling_bailing_moe_v2.py", "configuration_bailing_moe_v2.py"):
         path = _file(checkpoint / name, f"original source {name}")
@@ -171,16 +172,45 @@ def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
         repo / "tools/ling_ring_bf16/run_ring_verified.py",
         repo / "tools/ling_ring_bf16/generate_ring.py",
     ]
+    if executable is not None:
+        executable = _file(executable.resolve(strict=True), "executable")
+        paths.append(executable)
+    if router == "torch-cuda" or rms_mode == "torch-cuda":
+        paths += [repo / "tools/ling_ring_bf16/torch_router/router.hpp", repo / "tools/ling_ring_bf16/torch_router/router.cpp"]
+        if rms_mode == "torch-cuda": paths += [repo / "tools/ling_ring_bf16/torch_router/rms.hpp", repo / "tools/ling_ring_bf16/torch_router/rms.cpp"]
+        dynamic = [executable] if executable is not None else []
+        seen=set(); closure_names=set()
+        while dynamic:
+            lib=dynamic.pop()
+            if lib in seen: continue
+            if not lib.is_file(): raise VerificationError(f"missing dynamic dependency root: {lib}")
+            lib = lib.resolve(strict=True)
+            if lib in seen: continue
+            seen.add(lib); closure_names.add(lib.name)
+            try: text=subprocess.check_output(["ldd", str(lib)], text=True, stderr=subprocess.STDOUT)
+            except (OSError, subprocess.CalledProcessError) as exc: raise VerificationError(f"cannot inspect dynamic library closure: {lib}") from exc
+            for line in text.splitlines():
+                if "not found" in line: raise VerificationError(f"unresolved dynamic dependency for {lib}: {line.strip()}")
+                m=re.search(r"=>\s+(\S+)", line)
+                candidate=Path(m.group(1)) if m else (Path(line.strip().split()[0]) if line.strip().startswith("/") else None)
+                if candidate:
+                    try: candidate=candidate.resolve(strict=True)
+                    except OSError as exc: raise VerificationError(f"unresolved dynamic dependency: {candidate}") from exc
+                    if candidate not in seen: paths.append(candidate); dynamic.append(candidate)
+        required = {"libtorch_cpu.so", "libtorch_cuda.so", "libc10.so"}
+        if not required.issubset(closure_names):
+            missing = ", ".join(sorted(required - closure_names))
+            raise VerificationError(f"Torch backend executable closure missing: {missing}")
     for path in paths:
         _file(path, "relevant source")
-        rel = str(path.relative_to(repo))
+        rel = str(path.relative_to(repo)) if path.is_relative_to(repo) else "external:" + str(path)
         relevant[rel] = {"sha256": _sha(path), "size": path.stat().st_size}
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=()) -> dict:
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), router: str = "native", rms_mode: str = "native") -> dict:
     checkpoint_files, _ = _checkpoint_files(checkpoint)
-    original, relevant = _source_files(checkpoint, repo)
+    original, relevant = _source_files(checkpoint, repo, router, executable, rms_mode)
     frontend = {}
     for path in binding_files:
         path = _file(Path(path), "frontend binding")
@@ -309,7 +339,9 @@ def _require_generation(path: Path, token_ids: list[int], max_new: int, eos_ids:
 
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path, cache_mib: int,
                  generate: int = 0, eos_ids=None, logits_mode: str = "all", binding_files=(), timeout: float = 1800,
-                 route_probe: str | None = None, matmul: str = "bf16-gemv") -> dict:
+                 route_probe: str | None = None, matmul: str = "bf16-gemv", router: str = "native",
+                 attention_order: str = "native", attention_scale: str = "native",
+                 rope_frequency: str = "native", rms_mode: str = "native") -> dict:
     checkpoint = checkpoint.resolve()
     manifest = manifest.resolve()
     executable = executable.resolve()
@@ -326,8 +358,16 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("generate must fit within the 4096-token evaluation window")
     if logits_mode not in {"all", "last"}:
         raise VerificationError("logits_mode must be all or last")
+    if rope_frequency not in {"native", "original"}:
+        raise VerificationError("rope_frequency must be native or original")
+    if attention_order not in {"native", "normalized-first"} or attention_scale not in {"native", "divide"}:
+        raise VerificationError("invalid attention arithmetic profile")
     if matmul not in {"bf16-gemv", "fp32-cublas"}:
         raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
+    if router not in {"native", "torch-cuda"}:
+        raise VerificationError("router must be native or torch-cuda")
+    if rms_mode not in {"native", "torch-cuda"}:
+        raise VerificationError("rms mode must be native or torch-cuda")
     if generate and logits_mode != "all":
         raise VerificationError("generation requires logits_mode all")
     if not generate:
@@ -358,13 +398,20 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
             raise VerificationError("requested manifest differs from freshly prepared manifest")
 
     manifest_hash = _sha(manifest)
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), manifest_hash,
             "--matmul", matmul]
+    if router != "native":
+        argv += ["--router", router]
+    if rms_mode != "native":
+        argv += ["--rms-mode", rms_mode]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos)), "--logits-mode", logits_mode]
     elif logits_mode != "all":
         argv += ["--logits-mode", logits_mode]
+    if rope_frequency != "native": argv += ["--rope-frequency", rope_frequency]
+    if attention_order != "native": argv += ["--attention-order", attention_order]
+    if attention_scale != "native": argv += ["--attention-scale", attention_scale]
     if parsed_probe is not None:
         argv += ["--route-probe", f"{parsed_probe[0]},{parsed_probe[1]}"]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
@@ -374,10 +421,18 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     if not output.is_dir():
         raise VerificationError("Ring executable did not create output directory")
 
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
     execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul)
+    if execution.get("router_backend", "native") != router:
+        raise VerificationError("execution router backend mismatch")
+    if execution.get("rope_frequency", "native") != rope_frequency:
+        raise VerificationError("execution RoPE frequency mode mismatch")
+    if execution.get("rms_backend", "native") != rms_mode:
+        raise VerificationError("execution RMS backend mismatch")
+    if execution.get("attention_value_order", "native") != attention_order or execution.get("attention_score_scale", "native") != attention_scale:
+        raise VerificationError("execution attention arithmetic profile mismatch")
     native = {}
     expected_native = EXPECTED_NATIVE + (("generation.json",) if generate else ())
     if parsed_probe is not None:
@@ -401,6 +456,9 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         "argv": argv,
         "cache_mib": cache_mib,
         "matmul_backend": matmul,
+        "rope_frequency": rope_frequency,
+        "attention_value_order": attention_order, "attention_score_scale": attention_scale,
+        "rms_mode": rms_mode,
         "execution": execution,
         "native_outputs": native,
         "scope": {
@@ -431,6 +489,11 @@ def main() -> int:
     parser.add_argument("--eos", help="comma-separated EOS IDs; required with --generate")
     parser.add_argument("--logits-mode", choices=("all", "last"), default="all")
     parser.add_argument("--timeout", type=float, default=1800)
+    parser.add_argument("--rope-frequency", choices=("native", "original"), default="native")
+    parser.add_argument("--router", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--rms-mode", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--attention-order", choices=("native", "normalized-first"), default="native")
+    parser.add_argument("--attention-scale", choices=("native", "divide"), default="native")
     parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
     parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv",
                         help="linear backend; fp32-cublas widens cached BF16 weights into temporary FP32 scratch")
@@ -440,7 +503,9 @@ def main() -> int:
     try:
         print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib,
                                      args.generate, args.eos, args.logits_mode, binding_files=args.bind_file,
-                                     timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul), indent=2, sort_keys=True))
+                                     timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul, router=args.router,
+                                     attention_order=args.attention_order, attention_scale=args.attention_scale,
+                                     rope_frequency=args.rope_frequency, rms_mode=args.rms_mode), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

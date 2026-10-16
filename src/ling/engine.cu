@@ -6,16 +6,19 @@
 #include <csignal>
 #include <cstring>
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <strata/kernels/bf16_gemv.hpp>
 #include <strata/ling/kda.hpp>
 #include <strata/ling/mla.hpp>
+#include <strata/ling/rms.hpp>
 #include <strata/ring/expert_cache.hpp>
 #include <strata/ring/generation.hpp>
 #include <strata/ring/numerics.hpp>
@@ -33,6 +36,9 @@ static void check_cancelled() {
 static void check(cudaError_t e) {
   if (e != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(e));
+}
+static void check_cublas(cublasStatus_t e) {
+  if (e != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("cuBLAS operation failed");
 }
 static float bf16(uint16_t b) {
   uint32_t u = uint32_t(b) << 16;
@@ -65,9 +71,10 @@ static void finite(const std::vector<float> &x) {
       throw std::runtime_error("nonfinite forward state");
 }
 static std::vector<float> norm(const std::vector<float> &x,
-                               const sr::TensorView &weight) {
+                               const sr::TensorView &weight,
+                               strata::ling::RmsMode mode) {
   shape(weight, {x.size()});
-  return sr::rms_norm(x, floats(weight));
+  return strata::ling::rms_norm(x, floats(weight), mode);
 }
 static void add(std::vector<float> &x, const std::vector<float> &y) {
   if (x.size() != y.size())
@@ -109,35 +116,53 @@ struct CudaBackend final : sr::ExpertCache::Backend {
     }
   }
 };
+enum class MatmulBackend { Bf16Gemv, Fp32Cublas };
+static const char *matmul_backend_name(MatmulBackend b) { return b == MatmulBackend::Fp32Cublas ? "fp32-cublas" : "bf16-gemv"; }
+static MatmulBackend parse_matmul_backend(const std::string &v) {
+  if (v == "bf16-gemv") return MatmulBackend::Bf16Gemv;
+  if (v == "fp32-cublas") return MatmulBackend::Fp32Cublas;
+  throw std::invalid_argument("matmul backend must be bf16-gemv or fp32-cublas");
+}
+__global__ static void widen_bf16(const uint16_t *src, float *dst, size_t count) {
+  const size_t i=size_t(blockIdx.x)*blockDim.x+threadIdx.x;
+  if (i<count) dst[i]=__uint_as_float(uint32_t(src[i])<<16);
+}
 class Matvec {
-  // Largest matrix is the unmodified BF16 output head.
-  DeviceBuffer weight{size_t(157184) * 1536 * 2}, x{4608 * 4}, y{157184 * 4};
-
+  static constexpr size_t max_weight_bytes=size_t(157184)*1536*2;
+  DeviceBuffer weight{max_weight_bytes}, x{4608*4}, y{157184*4};
+  MatmulBackend backend_; std::unique_ptr<DeviceBuffer> fp32_weight; cublasHandle_t cublas=nullptr;
 public:
-  static constexpr size_t workspace_bytes =
-      size_t(157184) * 1536 * 2 + 4608 * 4 + 157184 * 4;
-  std::vector<float> apply_device(const uint16_t *w, size_t rows, size_t cols,
-                                  const std::vector<float> &input) {
-    if (input.size() != cols || cols > 4608 || rows > 157184 || cols % 2)
-      throw std::runtime_error("matvec geometry");
-    check(cudaMemcpy(x.p, input.data(), cols * 4, cudaMemcpyHostToDevice));
-    strata::kernels::bf16_gemv_fp32_mmvf(static_cast<float *>(x.p), w,
-                                         static_cast<float *>(y.p), cols, rows,
-                                         nullptr);
-    check(cudaGetLastError());
-    std::vector<float> output(rows);
-    check(cudaMemcpy(output.data(), y.p, rows * 4, cudaMemcpyDeviceToHost));
-    finite(output);
-    return output;
+  static constexpr size_t fp32_weight_bytes=size_t(157184)*1536*4;
+  static constexpr size_t base_workspace_bytes=max_weight_bytes+4608*4+157184*4;
+  static constexpr size_t workspace_bytes(MatmulBackend b) { return base_workspace_bytes+(b==MatmulBackend::Fp32Cublas?fp32_weight_bytes:0); }
+  static constexpr size_t fp32_scratch_bytes(MatmulBackend b) { return b==MatmulBackend::Fp32Cublas?fp32_weight_bytes:0; }
+  explicit Matvec(MatmulBackend b):backend_(b) {
+    if (backend_==MatmulBackend::Fp32Cublas) {
+      fp32_weight=std::make_unique<DeviceBuffer>(fp32_weight_bytes);
+      check_cublas(cublasCreate(&cublas)); check_cublas(cublasSetMathMode(cublas,CUBLAS_PEDANTIC_MATH));
+      check_cublas(cublasSetAtomicsMode(cublas,CUBLAS_ATOMICS_NOT_ALLOWED));
+    }
   }
-  std::vector<float> apply(const sr::TensorView &t,
-                           const std::vector<float> &input) {
-    if (t.shape.size() != 2 || t.shape[1] != input.size() ||
-        t.dtype != "BF16" || t.bytes > weight.bytes)
-      throw std::runtime_error("expected compatible original BF16 matrix");
-    check(cudaMemcpy(weight.p, t.data, t.bytes, cudaMemcpyHostToDevice));
-    return apply_device(static_cast<uint16_t *>(weight.p), t.shape[0],
-                        t.shape[1], input);
+  ~Matvec() { if(cublas) cublasDestroy(cublas); }
+  std::vector<float> apply_device(const uint16_t *w,size_t rows,size_t cols,const std::vector<float> &input) {
+    if(input.size()!=cols || cols==0 || rows==0 || cols>4608 || rows>157184 || cols%2 || rows > max_weight_bytes / 2 / cols) throw std::runtime_error("matvec geometry");
+    check(cudaMemcpy(x.p,input.data(),cols*4,cudaMemcpyHostToDevice));
+    if(backend_==MatmulBackend::Bf16Gemv) {
+      strata::kernels::bf16_gemv_fp32_mmvf(static_cast<float*>(x.p),w,static_cast<float*>(y.p),cols,rows,nullptr);
+      check(cudaGetLastError());
+    } else {
+      if(!fp32_weight || !cublas) throw std::runtime_error("cuBLAS backend is not initialized");
+      const size_t count=rows*cols;
+      widen_bf16<<<static_cast<int>((count+255)/256),256>>>(w,static_cast<float*>(fp32_weight->p),count);
+      check(cudaGetLastError()); const float alpha=1.0f,beta=0.0f;
+      check_cublas(cublasSgemm(cublas,CUBLAS_OP_T,CUBLAS_OP_N,static_cast<int>(rows),1,static_cast<int>(cols),&alpha,
+        static_cast<const float*>(fp32_weight->p),static_cast<int>(cols),static_cast<const float*>(x.p),static_cast<int>(cols),&beta,static_cast<float*>(y.p),static_cast<int>(rows)));
+    }
+    std::vector<float> output(rows); check(cudaMemcpy(output.data(),y.p,rows*4,cudaMemcpyDeviceToHost)); finite(output); return output;
+  }
+  std::vector<float> apply(const sr::TensorView &t,const std::vector<float> &input) {
+    if(t.shape.size()!=2 || t.shape[0]==0 || t.shape[1]==0 || t.shape[1]!=input.size() || t.dtype!="BF16" || t.bytes>weight.bytes || t.shape[0] > max_weight_bytes / 2 / t.shape[1]) throw std::runtime_error("expected compatible original BF16 matrix");
+    check(cudaMemcpy(weight.p,t.data,t.bytes,cudaMemcpyHostToDevice)); return apply_device(static_cast<uint16_t*>(weight.p),t.shape[0],t.shape[1],input);
   }
 };
 static std::vector<float> swiglu(std::vector<float> g,
@@ -162,6 +187,78 @@ static void write_row(const std::filesystem::path &p,
   std::ofstream out(p, std::ios::binary | std::ios::app);
   if (!out.write(reinterpret_cast<const char *>(x.data()), x.size() * 4))
     throw std::runtime_error("output write failed");
+}
+
+static void write_float_array(std::ostream &out, const std::vector<float> &values) {
+  out << '[' << std::setprecision(9);
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i) out << ',';
+    out << values[i];
+  }
+  out << ']';
+}
+
+struct RouteProbe {
+  size_t position;
+  size_t layer;
+};
+
+static RouteProbe parse_route_probe(const std::string &text) {
+  if (text.empty() || text.find(',') == std::string::npos ||
+      text.find(',', text.find(',') + 1) != std::string::npos)
+    throw std::invalid_argument("route probe must be POS,LAYER");
+  const size_t comma = text.find(',');
+  const size_t position = sr::unsigned_decimal(text.substr(0, comma));
+  const size_t layer = sr::unsigned_decimal(text.substr(comma + 1));
+  if (position >= 1024 || layer == 0 || layer >= 24)
+    throw std::invalid_argument("route probe position/layer out of range");
+  return {position, layer};
+}
+
+static void write_route_probe(const std::filesystem::path &path,
+                              const RouteProbe &probe,
+                              const std::vector<float> &input_hidden,
+                              const std::vector<float> &post_attention_hidden,
+                              const std::vector<float> &gate_input,
+                              const std::vector<float> &router_logits,
+                              const std::vector<float> &sigmoid_scores,
+                              const std::vector<float> &expert_bias,
+                              const std::vector<float> &corrected,
+                              const std::vector<size_t> &ids,
+                              const std::vector<float> &weights) {
+  if (input_hidden.size() != 1536 || post_attention_hidden.size() != 1536 ||
+      gate_input.size() != 1536 || router_logits.size() != 128 ||
+      sigmoid_scores.size() != 128 || expert_bias.size() != 128 ||
+      corrected.size() != 128 || ids.size() != 8 || weights.size() != 8)
+    throw std::runtime_error("route probe geometry");
+  std::ofstream out(path);
+  if (!out) throw std::runtime_error("route probe output open failed");
+  out << std::setprecision(9)
+      << "{\"position\":" << probe.position << ",\"layer\":" << probe.layer
+      << ",\"score_reconstruction\":\"native routing sigmoid and bias correction recomputed from the same gate output\","
+      << "\"input_hidden\":";
+  write_float_array(out, input_hidden);
+  out << ",\"post_attention_hidden\":";
+  write_float_array(out, post_attention_hidden);
+  out << ",\"gate_input\":";
+  write_float_array(out, gate_input);
+  out << ",\"router_logits\":";
+  write_float_array(out, router_logits);
+  out << ",\"sigmoid_scores\":";
+  write_float_array(out, sigmoid_scores);
+  out << ",\"expert_bias\":";
+  write_float_array(out, expert_bias);
+  out << ",\"bias_corrected_scores\":";
+  write_float_array(out, corrected);
+  out << ",\"selected_expert_ids\":[";
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (i) out << ',';
+    out << ids[i];
+  }
+  out << "],\"selected_weights\":";
+  write_float_array(out, weights);
+  out << "}" << '\n';
+  if (!out) throw std::runtime_error("route probe output failed");
 }
 
 namespace sl = strata::ling;
@@ -209,15 +306,16 @@ struct KdaLayer {
 };
 static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
                                   const std::string &pre, const std::vector<float> &x,
-                                  sl::MlaCache &cache, size_t position) {
+                                  sl::MlaCache &cache, size_t position,
+                                  sl::RmsMode rms_mode) {
   auto qa=mv.apply(store.tensor(pre+"q_a_proj.weight"),x);
-  qa=norm(qa,store.tensor(pre+"q_a_layernorm.weight"));
+  qa=norm(qa,store.tensor(pre+"q_a_layernorm.weight"),rms_mode);
   auto q=mv.apply(store.tensor(pre+"q_b_proj.weight"),qa);
   auto compressed=mv.apply(store.tensor(pre+"kv_a_proj_with_mqa.weight"),x);
   if(compressed.size()!=576) throw std::runtime_error("MLA compressed KV geometry");
   std::vector<float> low(compressed.begin(),compressed.begin()+512);
   std::vector<float> rope(compressed.begin()+512,compressed.end());
-  low=norm(low,store.tensor(pre+"kv_a_layernorm.weight"));
+  low=norm(low,store.tensor(pre+"kv_a_layernorm.weight"),rms_mode);
   auto expanded=mv.apply(store.tensor(pre+"kv_b_proj.weight"),low);
   if(expanded.size()!=4096) throw std::runtime_error("MLA expanded KV geometry");
   std::vector<float> key(2048),value(2048);
@@ -231,17 +329,32 @@ static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
 int main(int argc,char **argv) {
   try {
     if(argc < 7 || (argc - 7) % 2)
-      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV]");
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order]");
 
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
-    size_t generate=0; std::vector<int> eos; std::vector<std::string> options;
+    size_t generate=0; std::vector<int> eos; std::optional<RouteProbe> route_probe;
+    sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
+    sl::RmsMode rms_mode=sl::RmsMode::Native;
+    std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; std::vector<std::string> options;
     for(int i=7;i<argc;i+=2) {
       const std::string option=argv[i];
       if(std::find(options.begin(),options.end(),option)!=options.end()) throw std::invalid_argument("duplicate option");
       options.push_back(option);
       if(option=="--generate") generate=sr::unsigned_decimal(argv[i+1]);
       else if(option=="--eos") eos=sr::vocabulary_ids(argv[i+1],157184);
+      else if(option=="--route-probe") route_probe=parse_route_probe(argv[i+1]);
+      else if(option=="--matmul") { matmul_name=argv[i+1]; matmul_backend=parse_matmul_backend(matmul_name); }
+      else if(option=="--rope-frequency") {
+        rope_frequency_name=argv[i+1];
+        if(rope_frequency_name=="original") rope_frequency=sl::MlaRopeFrequency::Original;
+        else if(rope_frequency_name!="native") throw std::invalid_argument("rope frequency must be native or original");
+      }
+      else if(option=="--rms-mode") {
+        rms_mode_name=argv[i+1];
+        if(rms_mode_name=="torch-cuda-order") rms_mode=sl::RmsMode::TorchCudaOrder;
+        else if(rms_mode_name!="native") throw std::invalid_argument("RMS mode must be native or torch-cuda-order");
+      }
       else throw std::invalid_argument("unknown option");
     }
     if(generate>1024) throw std::invalid_argument("generation exceeds 1024-token bound");
@@ -263,9 +376,9 @@ int main(int argc,char **argv) {
     if(props.major!=8 || props.minor!=9) throw std::runtime_error("this target is qualified only for sm_89");
     size_t free=0,total=0; check(cudaMemGetInfo(&free,&total));
     const size_t budget=cache_mib*1024*1024;
-    if(free<budget+Matvec::workspace_bytes+size_t(512)*1024*1024)
+    if(free<budget+Matvec::workspace_bytes(matmul_backend)+size_t(512)*1024*1024)
       throw std::runtime_error("insufficient free GPU memory; no process will be stopped");
-    Matvec mv;
+    Matvec mv(matmul_backend);
     auto backend=std::make_shared<CudaBackend>();
     sr::ExpertCache cache({budget,24,128},backend);
     sr::ExpertCache::Provider provider=[&](const sr::ExpertKey &key,sr::ExpertPayload &p,std::string &error) {
@@ -284,10 +397,15 @@ int main(int argc,char **argv) {
     std::vector<std::unique_ptr<KdaLayer>> kda(24);
     std::vector<std::unique_ptr<sl::MlaCache>> mla(24);
     for(size_t l=0;l<24;++l) {
-      if(l%4==3) mla[l]=std::make_unique<sl::MlaCache>(sl::MlaConfig{},generation.kv_capacity());
+      if(l%4==3) { sl::MlaConfig config{}; config.rope_frequency=rope_frequency;
+        mla[l]=std::make_unique<sl::MlaCache>(config,generation.kv_capacity()); }
       else kda[l]=std::make_unique<KdaLayer>(store,"model.layers."+std::to_string(l)+".attention.");
     }
     const sr::RouterConfig routing{128,8,4,8,2.5f};
+    std::vector<float> probe_input_hidden, probe_post_attention_hidden, probe_gate_input, probe_router_logits, probe_sigmoid,
+        probe_bias, probe_corrected, probe_weights;
+    std::vector<size_t> probe_ids;
+    bool probe_captured=false;
     std::filesystem::create_directories(output);
     std::ofstream routes(output/"routes.tsv"); routes<<std::setprecision(9);
     const auto start=std::chrono::steady_clock::now();
@@ -298,16 +416,31 @@ int main(int argc,char **argv) {
       }
       for(size_t layer=0;layer<24;++layer) {
         check_cancelled(); const std::string pre="model.layers."+std::to_string(layer)+".";
-        auto a=norm(h,store.tensor(pre+"input_layernorm.weight"));
+        const std::vector<float> input_hidden = h;
+        auto a=norm(h,store.tensor(pre+"input_layernorm.weight"),rms_mode);
         if(kda[layer]) add(h,kda[layer]->step(mv,store,pre+"attention.",a));
-        else add(h,mla_step(mv,store,pre+"attention.",a,*mla[layer],pos));
-        auto x=norm(h,store.tensor(pre+"post_attention_layernorm.weight"));
+        else add(h,mla_step(mv,store,pre+"attention.",a,*mla[layer],pos,rms_mode));
+        const std::vector<float> post_attention_hidden = h;
+        auto x=norm(h,store.tensor(pre+"post_attention_layernorm.weight"),rms_mode);
         if(layer==0) add(h,mlp(mv,store,pre+"mlp.",x));
         else {
           auto logits=mv.apply(store.tensor(pre+"mlp.gate.weight"),x);
           auto bias=floats(store.tensor(pre+"mlp.gate.expert_bias"));
           if(logits.size()!=128 || bias.size()!=128) throw std::runtime_error("router geometry");
           auto selected=sr::route(logits.data(),bias.data(),128,routing);
+          if(route_probe && route_probe->position==pos && route_probe->layer==layer) {
+            probe_gate_input=x; probe_router_logits=logits; probe_bias=bias;
+            probe_input_hidden=input_hidden; probe_post_attention_hidden=post_attention_hidden;
+            probe_sigmoid.resize(logits.size()); probe_corrected.resize(logits.size());
+            for(size_t i=0;i<logits.size();++i) {
+              const float score = logits[i] >= 0.0f
+                ? 1.0f/(1.0f+std::exp(-logits[i]))
+                : std::exp(logits[i])/(1.0f+std::exp(logits[i]));
+              probe_sigmoid[i]=score; probe_corrected[i]=score+bias[i];
+            }
+            probe_ids=selected.expert_ids; probe_weights=selected.weights;
+            probe_captured=true;
+          }
           std::vector<float> mixed(1536,0); routes<<pos<<'\t'<<layer;
           for(size_t j=0;j<8;++j) {
             auto expert=selected.expert_ids[j];routes<<'\t'<<expert<<':'<<selected.weights[j];
@@ -325,12 +458,19 @@ int main(int argc,char **argv) {
         }
         write_row(output/("layer-"+std::to_string(layer)+".f32"),h);
       }
-      h=norm(h,store.tensor("model.norm.weight"));write_row(output/"final-hidden.f32",h);
+      h=norm(h,store.tensor("model.norm.weight"),rms_mode);write_row(output/"final-hidden.f32",h);
       auto logits=mv.apply(store.tensor("lm_head.weight"),h);write_row(output/"logits.f32",logits);
       if(generation.sampling_position(pos)) generation.sample(pos,logits);
       std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
     }
     check_cancelled(); auto stats=cache.stats(); routes.flush();
+    if(route_probe) {
+      if(!probe_captured) throw std::runtime_error("route probe position was not evaluated");
+      write_route_probe(output/"route-probe.json",*route_probe,probe_input_hidden,
+                        probe_post_attention_hidden,probe_gate_input,
+                        probe_router_logits,probe_sigmoid,probe_bias,probe_corrected,
+                        probe_ids,probe_weights);
+    }
     if(generate) {
       std::ofstream generated(output/"generation.json");
       generated << generation.receipt("strata-ling-generation-v1"); generated.flush();
@@ -342,12 +482,12 @@ int main(int argc,char **argv) {
     std::ostringstream receipt;receipt<<std::setprecision(12)
       <<"{\"status\":\"executed\",\"model\":\"Ling-3.0-tiny\",\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
       <<tokens.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<tokens.size()
-      <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"cache_budget_bytes\":"<<budget
+      <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"rope_frequency\":\""<<rope_frequency_name<<"\",\"rms_mode\":\""<<rms_mode_name<<"\",\"cache_budget_bytes\":"<<budget
       <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
       <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""
       <<",\"host_attention_state_bytes\":"<<(size_t(6)*tokens.size()*16*(192+128)+size_t(18)*(16*128*128+3*2048*4))*sizeof(float)
-      <<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
-      <<",\"workspace_bytes\":"<<Matvec::workspace_bytes<<",\"wall_seconds\":"
+      <<",\"matmul_backend\":\""<<matmul_backend_name(matmul_backend)<<"\",\"matmul_fp32_weight_scratch_bytes\":"<<Matvec::fp32_scratch_bytes(matmul_backend)<<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
+      <<",\"workspace_bytes\":"<<Matvec::workspace_bytes(matmul_backend)<<",\"wall_seconds\":"
       <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"}\n";
     std::ofstream out(output/"execution.json");out<<receipt.str();out.flush();
     if(!out) throw std::runtime_error("execution receipt write failed");

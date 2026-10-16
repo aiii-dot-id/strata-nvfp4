@@ -79,6 +79,21 @@ def load(path: Path, count: int, label: str) -> np.ndarray:
     return values
 
 
+def _verify_probe_payload(probe: dict, position: int, layer: int, label: str) -> None:
+    if not isinstance(probe, dict) or probe.get("position") != position or probe.get("layer") != layer:
+        fail(f"{label} route probe position/layer mismatch")
+    for name, count in (("input_hidden", HIDDEN), ("post_attention_hidden", HIDDEN),
+                        ("gate_input", HIDDEN), ("router_logits", EXPERTS),
+                        ("sigmoid_scores", EXPERTS), ("expert_bias", EXPERTS),
+                        ("bias_corrected_scores", EXPERTS), ("selected_weights", TOPK)):
+        values = probe.get(name)
+        if not isinstance(values, list) or len(values) != count or any(not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(float(x)) for x in values):
+            fail(f"{label} route probe {name} is invalid")
+    ids = probe.get("selected_expert_ids")
+    if not isinstance(ids, list) or len(ids) != TOPK or any(type(x) is not int or isinstance(x, bool) or not 0 <= x < EXPERTS for x in ids) or len(set(ids)) != TOPK:
+        fail(f"{label} route probe expert IDs are invalid")
+
+
 def _reference_identity(report: dict) -> None:
     if report.get("status") != "executed":
         fail("reference report is not an executed receipt")
@@ -108,6 +123,15 @@ def verify_reference_hashes(root: Path, report: dict) -> None:
     if not isinstance(outputs, dict):
         fail("reference output hashes are missing")
     expected = {"final_hidden.fp32", "logits.fp32", "hidden_layers.fp32", "layers.json", "router_meta.json"}
+    route_probe_meta = report.get("route_probe")
+    if route_probe_meta is not None:
+        if (not isinstance(route_probe_meta, dict) or type(route_probe_meta.get("position")) is not int
+            or isinstance(route_probe_meta.get("position"), bool) or not 0 <= route_probe_meta["position"] < 1024
+            or type(route_probe_meta.get("layer")) is not int or isinstance(route_probe_meta.get("layer"), bool)
+            or not 1 <= route_probe_meta["layer"] < LAYERS
+            or route_probe_meta.get("output") != "route-probe.json"):
+            fail("reference route probe receipt is invalid")
+        expected.add("route-probe.json")
     if set(outputs) != expected:
         fail("reference output hashes are incomplete")
     for name in expected:
@@ -117,6 +141,9 @@ def verify_reference_hashes(root: Path, report: dict) -> None:
         path = root / name
         if not path.is_file() or _hash(path) != meta["sha256"] or type(meta.get("bytes")) is not int or meta["bytes"] != path.stat().st_size:
             fail(f"reference output hash mismatch: {name}")
+    if route_probe_meta is not None:
+        _verify_probe_payload(_json(root / "route-probe.json", "reference route probe"),
+                              route_probe_meta["position"], route_probe_meta["layer"], "reference")
 
 
 def _reference_source(report: dict) -> tuple[dict, str, str]:
@@ -204,8 +231,33 @@ def verify_provenance(candidate: Path, execution: dict, token_ids: list[int], re
             _pin(frontend.get(name), "generation frontend " + name)
         if provenance["generation"] != _json(candidate / "generation.json", "generation receipt"):
             fail("generation receipt differs from provenance")
+    route_probe_meta = provenance.get("route_probe")
+    route_probe_path = candidate / "route-probe.json"
+    if route_probe_meta is not None:
+        if (not isinstance(route_probe_meta, dict) or type(route_probe_meta.get("position")) is not int
+            or isinstance(route_probe_meta.get("position"), bool) or not 0 <= route_probe_meta["position"] < 1024
+            or type(route_probe_meta.get("layer")) is not int or isinstance(route_probe_meta.get("layer"), bool)
+            or not 1 <= route_probe_meta["layer"] < LAYERS
+            or route_probe_meta.get("output") != "route-probe.json"):
+            fail("candidate route probe receipt is invalid")
+        probe = _json(route_probe_path, "candidate route probe")
+        if probe.get("position") != route_probe_meta["position"] or probe.get("layer") != route_probe_meta["layer"]:
+            fail("candidate route probe position/layer mismatch")
+        for name, count in (("gate_input", HIDDEN), ("router_logits", EXPERTS),
+                            ("sigmoid_scores", EXPERTS), ("expert_bias", EXPERTS),
+                            ("bias_corrected_scores", EXPERTS), ("selected_weights", TOPK)):
+            values = probe.get(name)
+            if not isinstance(values, list) or len(values) != count or any(not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(float(x)) for x in values):
+                fail(f"candidate route probe {name} is invalid")
+        ids = probe.get("selected_expert_ids")
+        if not isinstance(ids, list) or len(ids) != TOPK or any(type(x) is not int or isinstance(x, bool) or not 0 <= x < EXPERTS for x in ids) or len(set(ids)) != TOPK:
+            fail("candidate route probe expert IDs are invalid")
+    elif route_probe_path.exists():
+        fail("candidate route probe is not bound in provenance")
     native = provenance.get("native_outputs")
     expected_native = NATIVE_OUTPUTS | ({"generation.json"} if generated else set())
+    if route_probe_meta is not None:
+        expected_native.add("route-probe.json")
     if not isinstance(native, dict) or set(native) != expected_native:
         fail("candidate native output hashes are incomplete")
     for name in expected_native:

@@ -51,6 +51,33 @@ def test_frontend_binds_template_and_writes_decoded_text(tmp_path, monkeypatch):
     assert (out / "generated.txt").read_text() == "answer"
 
 
+def test_frontend_forwards_original_rope_frequency(tmp_path, monkeypatch):
+    root = checkpoint(tmp_path)
+    for name in ("tokenizer.json", "tokenizer_config.json"):
+        (root / name).write_text("{}")
+    monkeypatch.setattr(generate_ring, "_tokenizer", lambda _: Tokenizer())
+    out = tmp_path / "out"; out.mkdir()
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen["rope_frequency"] = kwargs["rope_frequency"]
+        return {
+            "generation": {
+                "prompt_token_ids": [1, 2],
+                "generated_token_ids": [9],
+                "finish_reason": "eos",
+            },
+            "frontend": {"generation_config.json": {"sha256": "x"}},
+        }
+
+    monkeypatch.setattr(generate_ring, "run_verified", fake_run)
+    result = generate_ring.generate(
+        root, tmp_path / "manifest.tsv", Path("/bin/true"), "hello",
+        out, 6, 1, rope_frequency="original")
+    assert seen["rope_frequency"] == "original"
+    assert result["frontend"]["generated_token_ids"] == [9]
+
+
 def test_frontend_rejects_binding_drift_during_tokenization(tmp_path, monkeypatch):
     root = checkpoint(tmp_path)
     for name in ("tokenizer.json", "tokenizer_config.json"):

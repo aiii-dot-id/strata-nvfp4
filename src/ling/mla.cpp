@@ -2,6 +2,8 @@
 #include "strata/ling/mla.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -26,6 +28,36 @@ float sigmoid(float x) {
   if (x >= 0) return 1.0f/(1.0f+std::exp(-x));
   float e = std::exp(x); return e/(1.0f+e);
 }
+float original_inverse_frequency(size_t index) {
+  // Exact float32 values emitted by transformers 4.55.4's
+  // _compute_default_rope_parameters for Ling-3.0-tiny (theta=6000000,
+  // head_dim=rope_dim=64). The table is part of the original buffer metadata.
+  static constexpr uint32_t bits[32] = {
+      0x3f800000, 0x3f1d3070, 0x3ec108e6, 0x3e6d0df6,
+      0x3e118e6a, 0x3db2bfc4, 0x3d5b82da, 0x3d06c8c9,
+      0x3ca58548, 0x3c4b441d, 0x3bf99e78, 0x3b99456b,
+      0x3b3c3926, 0x3ae72552, 0x3a8deda0, 0x3a2e4b2b,
+      0x39d60a28, 0x39836cbb, 0x39216519, 0x38c63314,
+      0x387365a7, 0x38157366, 0x37b78819, 0x37616263,
+      0x370a63fc, 0x36a9f301, 0x3650b460, 0x3600261c,
+      0x359d5f3e, 0x3541425e, 0x34ed548b, 0x3491b9c1};
+  if (index >= 32) throw std::invalid_argument("original RoPE index out of range");
+  float value;
+  std::memcpy(&value, &bits[index], sizeof(value));
+  return value;
+}
+}
+float MlaCache::inverse_frequency(const MlaConfig &c, size_t index) {
+  if (index >= c.rope / 2) throw std::invalid_argument("RoPE index out of range");
+  if (c.rope_frequency == MlaRopeFrequency::Original) {
+    if (c.rope != 64 || c.theta != 6000000.0f)
+      throw std::invalid_argument("original Ling RoPE metadata requires theta=6000000 and rope=64");
+    return original_inverse_frequency(index);
+  }
+  const float exponent = 2.0f * float(index) / float(c.rope);
+  const float value = 1.0f / std::pow(c.theta, exponent);
+  if (!std::isfinite(value)) throw std::invalid_argument("nonfinite RoPE frequency");
+  return value;
 }
 MlaCache::MlaCache(MlaConfig c, size_t capacity)
     : config_(c), capacity_(capacity) {
@@ -33,6 +65,9 @@ MlaCache::MlaCache(MlaConfig c, size_t capacity)
       !capacity || !(c.theta > 0) || !std::isfinite(c.theta) ||
       c.nope > std::numeric_limits<size_t>::max()-c.rope)
     throw std::invalid_argument("invalid MLA geometry");
+  if (c.rope_frequency == MlaRopeFrequency::Original &&
+      (c.rope != 64 || c.theta != 6000000.0f))
+    throw std::invalid_argument("original Ling RoPE metadata requires theta=6000000 and rope=64");
   keys_.resize(product(product(capacity,c.heads),c.nope+c.rope));
   values_.resize(product(product(capacity,c.heads),c.value));
 }
@@ -51,7 +86,7 @@ std::vector<float> MlaCache::step(const std::vector<float> &query,
   require(gate_logits,c.heads);
   std::vector<float> q(query), k(c.heads*kd), kr(c.rope);
   for (size_t i=0;i<half;++i) {
-    const float inv = 1.0f/std::pow(c.theta,2.0f*float(i)/float(c.rope));
+    const float inv = inverse_frequency(c, i);
     const float angle = float(position)*inv;
     const float co=std::cos(angle), si=std::sin(angle);
     const float a=key_rope[2*i], b=key_rope[2*i+1];

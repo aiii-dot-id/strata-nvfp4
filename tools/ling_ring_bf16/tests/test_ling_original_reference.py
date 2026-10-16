@@ -76,6 +76,14 @@ def test_cached_mode_metadata_and_cli_contract(tmp_path):
     assert report["cache_metadata"] == {"cache_type": "DynamicCache", "tokenwise": True}
 
 
+def test_cached_route_probe_parser_is_strict():
+    mod = load_runner()
+    assert mod._parse_route_probe("337,19", 358, 24) == (337, 19)
+    for text in ("337", "337,19,1", "abc,19", "358,19", "337,0", "337,24"):
+        with pytest.raises(mod.ReferenceError):
+            mod._parse_route_probe(text, 358, 24)
+
+
 def test_cached_trace_state_control():
     mod = load_runner()
     rows = [[np.zeros(3, dtype=np.float32)] for _ in range(2)]

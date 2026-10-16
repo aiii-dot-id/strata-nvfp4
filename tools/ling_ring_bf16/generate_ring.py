@@ -58,7 +58,8 @@ def _ids(value) -> list[int]:
 
 def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, output: Path,
              cache_mib: int, max_new_tokens: int, system: str | None = None,
-             logits_mode: str = "all", timeout: float = 1800) -> dict:
+             logits_mode: str = "all", timeout: float = 1800, rope_frequency: str = "native",
+             attention_order: str = "native", attention_scale: str = "native", rms_mode: str = "native") -> dict:
     checkpoint = checkpoint.resolve()
     if max_new_tokens < 1 or max_new_tokens > 4096:
         raise VerificationError("max_new_tokens must be in 1..4096")
@@ -84,7 +85,8 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
         raise VerificationError("frontend tokenizer/config bindings drifted during tokenization")
     receipt = run_verified(checkpoint, manifest, executable, ",".join(map(str, prompt_ids)), output,
                            cache_mib, generate=max_new_tokens, eos_ids=eos,
-                           logits_mode=logits_mode, binding_files=binding, timeout=timeout)
+                           logits_mode=logits_mode, binding_files=binding, timeout=timeout,
+                           rope_frequency=rope_frequency, attention_order=attention_order, attention_scale=attention_scale, rms_mode=rms_mode)
     generation_receipt = receipt["generation"]
     generated_ids = generation_receipt["generated_token_ids"]
     try:
@@ -102,6 +104,7 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
         "eos_token_ids": eos,
         "max_new_tokens": max_new_tokens,
         "logits_mode": logits_mode,
+        "rope_frequency": rope_frequency, "attention_value_order": attention_order, "attention_score_scale": attention_scale, "rms_mode": rms_mode,
         "bindings": receipt["frontend"],
     }
     (output / "frontend.json").write_text(json.dumps(frontend, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -120,11 +123,16 @@ def main() -> int:
     parser.add_argument("--cache-mib", required=True, type=int)
     parser.add_argument("--max-new-tokens", required=True, type=int)
     parser.add_argument("--logits-mode", choices=("all", "last"), default="all")
+    parser.add_argument("--rope-frequency", choices=("native", "original"), default="native")
+    parser.add_argument("--attention-order", choices=("native", "normalized-first"), default="native")
+    parser.add_argument("--attention-scale", choices=("native", "divide"), default="native")
+    parser.add_argument("--rms-mode", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args()
     try:
         result = generate(args.checkpoint, args.manifest, args.executable, args.prompt, args.output,
-                          args.cache_mib, args.max_new_tokens, args.system, args.logits_mode, args.timeout)
+                          args.cache_mib, args.max_new_tokens, args.system, args.logits_mode, args.timeout,
+                          args.rope_frequency, args.attention_order, args.attention_scale, args.rms_mode)
         print(result["frontend"]["decoded"], end="")
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))

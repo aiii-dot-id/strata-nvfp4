@@ -6,7 +6,7 @@ working set. The implementation uses Strata's BF16 GEMV kernel for GPU matrix
 products, keeps activations in FP32, and uses a bounded BF16 expert cache. The
 cache budget caps the GPU payload. Receipts separately report the equal-size
 host payload copy; those two numbers must not be counted as one allocation.
-The original FP32 routing bias remains FP32. No model quantization or weight
+The original FP32 routing bias remains FP32. No model quantization or checkpoint weight
 conversion is performed.
 
 The current Ring reference executor includes:
@@ -22,20 +22,22 @@ The current Ring reference executor includes:
 - A token-ID full-forward reference executor that writes hidden states, logits,
   route traces, and an execution receipt.
 
-The executors are reference tools and do not provide the production server
-or production model-loader integration. The Ring token-ID executor has a
-separate greedy frontend that uses the original checkpoint tokenizer and chat
-template. Ling has an original-model forward reference runner with KDA/MLA
-execution. Bounded four-token, current cached 65-token, and 511-token
-long-context generation cases passed their declared strict gates. The
-historical batched 65-token default-path comparison remains a recorded strict
-failure with 319 ordered-route differences; its forced-recurrent diagnostic is
-separate evidence and does not qualify the default path. Thinking-on generation
-had an independent decoded diagnostic with exact answer 437 and EOS but retains
-one strict ordered-route failure with an equal expert set. The one-token
-length-control case passed.
-These are bounded forward, parity, and functional answer checks; there are no
-timing comparison, throughput, broad answer-quality, or production claims.
+The executors are opt-in reference tools and do not provide production
+server/model-loader integration. Both have greedy frontends using their
+original tokenizer and template. The current numerical investigation is
+recorded in [NUMERIC_PARITY_DIAGNOSTICS.md](NUMERIC_PARITY_DIAGNOSTICS.md),
+with exact receipt pins in
+[CURRENT_NUMERIC_QUALIFICATION.json](CURRENT_NUMERIC_QUALIFICATION.json).
+
+Ring's corrected original-frequency option passes the 519-position case;
+at 1,031 positions the optional CUDA router also matches all 19,589 ordered
+routes, but numerical gates still fail. Ling's combined FP32-cuBLAS and
+CUDA-order RMS profile repairs the original 358-position thinking trace and
+passes six of seven generation controls; a fresh 195-position trace fails
+29 routing rows. All top-token choices matching does not waive these failures.
+Historical batched/chunk-reference failures remain separate from the cached
+tokenwise protocol. These are bounded parity and functional controls, with no
+throughput, broad answer-quality, training, or production-readiness claim.
 
 Author attribution: AI Identity Incorported <james@aiii.id>
 

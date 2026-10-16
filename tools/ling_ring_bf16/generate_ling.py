@@ -62,13 +62,20 @@ def _ids(value):
     return value
 
 def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_new_tokens,
-             system=None, timeout=1800, eos_ids=None, thinking="auto"):
+             system=None, timeout=1800, eos_ids=None, thinking="auto", rope_frequency="native",
+             rms_mode="native", matmul="bf16-gemv"):
     checkpoint = Path(checkpoint).resolve()
     output = Path(output).resolve()
     if max_new_tokens < 1 or max_new_tokens > MAX_TOKENS:
         raise VerificationError("max_new_tokens must be in 1..1024")
     if thinking not in {"auto", "on", "off"}:
         raise VerificationError("thinking must be auto, on, or off")
+    if rope_frequency not in {"native", "original"}:
+        raise VerificationError("rope_frequency must be native or original")
+    if rms_mode not in {"native", "torch-cuda-order"}:
+        raise VerificationError("rms_mode must be native or torch-cuda-order")
+    if matmul not in {"bf16-gemv", "fp32-cublas"}:
+        raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     binding = _binding_paths(checkpoint)
     before = _snapshot(binding)
     eos, eos_source = _eos_ids(checkpoint, eos_ids)
@@ -92,7 +99,8 @@ def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_ne
         raise VerificationError("frontend tokenizer/config bindings drifted during tokenization")
     receipt = run_verified(
         checkpoint, manifest, executable, ",".join(map(str, prompt_ids)), output,
-        cache_mib, timeout, max_new_tokens, eos, binding_files=binding)
+        cache_mib, timeout, max_new_tokens, eos, binding_files=binding,
+        rope_frequency=rope_frequency, rms_mode=rms_mode, matmul=matmul)
     generated = receipt["generation"]["generated_token_ids"]
     try:
         decoded = tokenizer.decode(generated, skip_special_tokens=False,
@@ -105,7 +113,9 @@ def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_ne
         "prompt_token_ids": prompt_ids, "generated_token_ids": generated,
         "finish_reason": receipt["generation"]["finish_reason"],
         "decoded": decoded, "eos_token_ids": eos, "eos_source": eos_source,
-        "max_new_tokens": max_new_tokens, "bindings": receipt["frontend"],
+        "max_new_tokens": max_new_tokens, "rope_frequency": rope_frequency,
+        "rms_mode": rms_mode, "matmul": matmul,
+        "bindings": receipt["frontend"],
     }
     output.mkdir(parents=True, exist_ok=True)
     (output / "frontend.json").write_text(json.dumps(frontend, indent=2, sort_keys=True) + chr(10))
@@ -125,12 +135,16 @@ def main():
     p.add_argument("--max-new-tokens", required=True, type=int)
     p.add_argument("--timeout", type=float, default=1800)
     p.add_argument("--eos-ids", help="explicit comma-separated EOS override")
+    p.add_argument("--rope-frequency", choices=("native", "original"), default="native")
+    p.add_argument("--rms-mode", choices=("native", "torch-cuda-order"), default="native")
+    p.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     args = p.parse_args()
     try:
         explicit = None if args.eos_ids is None else [int(x, 10) for x in args.eos_ids.split(",")]
         result = generate(args.checkpoint, args.manifest, args.executable, args.prompt,
                           args.output, args.cache_mib, args.max_new_tokens, args.system,
-                          args.timeout, explicit, args.thinking)
+                          args.timeout, explicit, args.thinking, args.rope_frequency,
+                          args.rms_mode, args.matmul)
         print(result["frontend"]["decoded"], end="")
     except (OSError, ValueError, VerificationError) as exc:
         p.error(str(exc))

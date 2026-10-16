@@ -146,7 +146,47 @@ def _checkpoint_files(checkpoint: Path) -> dict:
     return files
 
 
-def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
+def _dynamic_library_closure(executable: Path, require_cublas: bool) -> dict:
+    """Pin canonical ldd closure for the opt-in cuBLAS backend."""
+    pending = [Path(executable).resolve(strict=True)]
+    seen: set[Path] = set()
+    paths: set[Path] = set()
+    cublas = False
+    while pending:
+        lib = pending.pop().resolve(strict=True)
+        if lib in seen:
+            continue
+        seen.add(lib)
+        try:
+            text = subprocess.check_output(["ldd", str(lib)], text=True, stderr=subprocess.STDOUT)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise VerificationError(f"cannot inspect dynamic library closure: {lib}") from exc
+        for line in text.splitlines():
+            if "not found" in line:
+                raise VerificationError(f"unresolved dynamic dependency for {lib}: {line.strip()}")
+            candidate = None
+            if "=>" in line:
+                rhs = line.split("=>", 1)[1].strip().split(None, 1)[0]
+                if rhs.startswith("/"):
+                    candidate = Path(rhs)
+            elif line.strip().startswith("/"):
+                candidate = Path(line.strip().split(None, 1)[0])
+            if candidate is None:
+                continue
+            try:
+                candidate = candidate.resolve(strict=True)
+            except OSError as exc:
+                raise VerificationError(f"unresolved dynamic dependency: {candidate}") from exc
+            paths.add(candidate)
+            if "libcublas.so" in candidate.name:
+                cublas = True
+            if candidate not in seen:
+                pending.append(candidate)
+    if require_cublas and not cublas:
+        raise VerificationError("fp32-cublas executable closure has no libcublas.so")
+    return {"external:" + str(path): _pin(path, "dynamic library") for path in sorted(paths)}
+
+def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, matmul: str = "bf16-gemv") -> tuple[dict, dict]:
     original = {name: _pin(checkpoint / name, f"original source {name}") for name in
                 ("modeling_bailing_moe_v3.py", "configuration_bailing_moe_v3.py")}
     # Keep this closure aligned with ling/CMakeLists.txt.  The Ling CUDA
@@ -156,7 +196,8 @@ def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
     paths = [
         *sorted((repo / "include/strata/ling").glob("*.hpp")),
         *sorted((repo / "src/ling").glob("*")),
-        *sorted((repo / "include/strata/ring").glob("*.hpp")),
+        *(repo / "include/strata/ring" / name for name in
+          ("expert_cache.hpp", "generation.hpp", "numerics.hpp", "routing.hpp", "tensor_store.hpp")),
         *(repo / "src/ring" / name for name in
           ("routing.cpp", "expert_cache.cpp", "tensor_store.cpp")),
         repo / "include/strata/kernels/bf16_gemv.hpp",
@@ -177,11 +218,15 @@ def _source_files(checkpoint: Path, repo: Path) -> tuple[dict, dict]:
         seen.add(path)
         rel = str(_file(path, "relevant source").relative_to(repo))
         relevant[rel] = _pin(path, "relevant source")
+    if matmul == "fp32-cublas":
+        if executable is None:
+            raise VerificationError("fp32-cublas requires an executable for library binding")
+        relevant.update(_dynamic_library_closure(executable, True))
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=()) -> dict:
-    original, relevant = _source_files(checkpoint, repo)
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), matmul: str = "bf16-gemv") -> dict:
+    original, relevant = (_source_files(checkpoint, repo) if matmul == "bf16-gemv" else _source_files(checkpoint, repo, executable, matmul))
     frontend = {}
     for path in binding_files:
         path = _file(Path(path), "frontend binding")
@@ -189,7 +234,9 @@ def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, 
         except ValueError as exc: raise VerificationError("frontend binding must be inside checkpoint") from exc
         frontend[name] = _pin(path, "frontend binding")
     return {"checkpoint": _checkpoint_files(checkpoint), "original_source": original,
-            "relevant_source": relevant, "manifest": _pin(manifest, "manifest"),
+            "relevant_source": relevant,
+            "runtime_libraries": {k: v for k, v in relevant.items() if k.startswith("external:")},
+            "manifest": _pin(manifest, "manifest"),
             "executable": _pin(executable, "executable"), "frontend": frontend}
 
 
@@ -206,15 +253,36 @@ def _tokens(text: str) -> list[int]:
     return values
 
 
-def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str, generate: int = 0) -> dict:
+def _parse_route_probe(text: str) -> tuple[int, int]:
+    parts = text.split(",")
+    if len(parts) != 2 or any(not part or any(ch not in "0123456789" for ch in part) for part in parts):
+        raise VerificationError("route probe must be POS,LAYER unsigned decimals")
+    position, layer = (int(part, 10) for part in parts)
+    if position >= MAX_TOKENS or layer < 1 or layer >= LAYERS:
+        raise VerificationError("route probe position/layer is out of range")
+    return position, layer
+
+
+def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
+                       generate: int = 0, rope_frequency: str = "native",
+                       rms_mode: str = "native", matmul: str = "bf16-gemv") -> dict:
     execution = _read_json(path, "execution receipt")
     expected = {"status": "executed", "model": MODEL, "activation_dtype": "FP32",
-                "quantized": False, "layers": LAYERS, "checkpoint_id": checkpoint_id}
+                "quantized": False, "layers": LAYERS, "checkpoint_id": checkpoint_id,
+                "rope_frequency": rope_frequency, "rms_mode": rms_mode, "matmul_backend": matmul}
     for key, value in expected.items():
         if execution.get(key) != value:
             raise VerificationError(f"execution receipt mismatch: {key}")
     if type(execution.get("quantized")) is not bool or execution.get("quantized") is not False:
         raise VerificationError("execution quantized must be false boolean")
+    scratch = execution.get("matmul_fp32_weight_scratch_bytes")
+    workspace = execution.get("workspace_bytes")
+    if type(scratch) is not int or isinstance(scratch, bool) or scratch < 0 or type(workspace) is not int or isinstance(workspace, bool) or workspace < 0:
+        raise VerificationError("execution workspace accounting is invalid")
+    expected_scratch = 157184 * 1536 * 4 if matmul == "fp32-cublas" else 0
+    expected_workspace = 157184 * 1536 * 2 + 4608 * 4 + 157184 * 4 + expected_scratch
+    if scratch != expected_scratch or workspace != expected_workspace:
+        raise VerificationError("execution workspace does not match matmul backend")
     evaluated = execution.get("token_ids")
     if not isinstance(evaluated, list) or any(type(x) is not int or isinstance(x, bool) or x < 0 or x >= VOCAB for x in evaluated):
         raise VerificationError("execution token identity is invalid")
@@ -310,9 +378,25 @@ def _route_rows(path: Path, tokens: int) -> None:
         raise VerificationError(f"route rows incomplete: expected {len(expected)}, got {len(seen)}")
 
 
-def _native_outputs(output: Path, tokens: int, generation: bool = False) -> dict:
+def _route_probe(path: Path, expected: tuple[int, int]) -> None:
+    value = _read_json(path, "route probe")
+    if value.get("position") != expected[0] or value.get("layer") != expected[1]:
+        raise VerificationError("route probe position/layer mismatch")
+    for name, count in (("input_hidden", HIDDEN), ("post_attention_hidden", HIDDEN),
+                        ("gate_input", HIDDEN), ("router_logits", EXPERTS),
+                        ("sigmoid_scores", EXPERTS), ("expert_bias", EXPERTS),
+                        ("bias_corrected_scores", EXPERTS), ("selected_weights", TOPK)):
+        values = value.get(name)
+        if not isinstance(values, list) or len(values) != count or any(not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(float(x)) for x in values):
+            raise VerificationError(f"route probe {name} is invalid")
+    ids = value.get("selected_expert_ids")
+    if not isinstance(ids, list) or len(ids) != TOPK or any(type(x) is not int or isinstance(x, bool) or not 0 <= x < EXPERTS for x in ids) or len(set(ids)) != TOPK:
+        raise VerificationError("route probe selected expert IDs are invalid")
+
+
+def _native_outputs(output: Path, tokens: int, generation: bool = False, route_probe: tuple[int, int] | None = None) -> dict:
     result = {}
-    names = EXPECTED_NATIVE + (("generation.json",) if generation else ())
+    names = EXPECTED_NATIVE + (("generation.json",) if generation else ()) + (("route-probe.json",) if route_probe else ())
     for name in names:
         path = _file(output / name, f"native output {name}")
         if name.startswith("layer-") or name == "final-hidden.f32":
@@ -321,15 +405,26 @@ def _native_outputs(output: Path, tokens: int, generation: bool = False) -> dict
             _finite_f32(path, tokens * VOCAB * 4, name)
         elif name == "routes.tsv":
             _route_rows(path, tokens)
+        elif name == "route-probe.json":
+            _route_probe(path, route_probe)
         result[name] = {"sha256": _sha(path), "size": path.stat().st_size}
     return result
 
 
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path,
-                 cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None, binding_files=()) -> dict:
+                 cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None,
+                 binding_files=(), route_probe=None, rope_frequency: str = "native",
+                 rms_mode: str = "native", matmul: str = "bf16-gemv") -> dict:
     checkpoint, manifest, executable, output = (Path(x).resolve() for x in (checkpoint, manifest, executable, output))
     repo = Path(__file__).resolve().parents[2]
     token_ids = _tokens(tokens)
+    parsed_probe = _parse_route_probe(route_probe) if route_probe is not None else None
+    if rope_frequency not in {"native", "original"}:
+        raise VerificationError("rope_frequency must be native or original")
+    if rms_mode not in {"native", "torch-cuda-order"}:
+        raise VerificationError("rms_mode must be native or torch-cuda-order")
+    if matmul not in {"bf16-gemv", "fp32-cublas"}:
+        raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     if output.exists():
         raise VerificationError(f"refusing existing output: {output}")
     if type(cache_mib) is not int or not 5 <= cache_mib <= 2048:
@@ -359,28 +454,35 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     checkpoint_id = _sha(manifest)
     if generate and not {"tokenizer.json", "tokenizer_config.json", "generation_config.json"} <= {Path(x).name for x in binding_files}:
         raise VerificationError("generation requires tokenizer and generation-config bindings")
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), checkpoint_id]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos))]
+    if parsed_probe:
+        argv += ["--route-probe", f"{parsed_probe[0]},{parsed_probe[1]}"]
+    argv += ["--rope-frequency", rope_frequency]
+    argv += ["--rms-mode", rms_mode, "--matmul", matmul]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
     if returncode != 0:
         raise VerificationError(f"Ling executable failed ({returncode}): {stderr.strip()[-2000:]}")
     if not output.is_dir():
         raise VerificationError("Ling executable did not create output directory")
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate)
+    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul)
     evaluated_tokens = len(execution.get("token_ids", token_ids))
-    native = _native_outputs(output, evaluated_tokens, bool(generate))
+    native = _native_outputs(output, evaluated_tokens, bool(generate), parsed_probe)
     receipt = {"schema": "strata-ling-verified-run-v1", "status": "verified",
                "model": MODEL, "checkpoint_id": checkpoint_id, "checkpoint": before["checkpoint"],
                "original_source": before["original_source"], "relevant_source": before["relevant_source"],
+               "runtime_libraries": before["runtime_libraries"],
                "manifest": before["manifest"], "executable": before["executable"], "frontend": before["frontend"], "argv": argv,
                "cache_mib": cache_mib, "execution": execution, "native_outputs": native,
                "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, original model/configuration sources, and the Ling build source closure (all Ling sources/headers, shared headers, the three linked Ring translation units, CUDA kernels, CMake, wrapper, and frontend) hashed before and after execution",
                          "reference": "native Ling forward receipt and structural outputs only; no claim of original equivalence, activation quality, or production readiness"}}
+    if parsed_probe:
+        receipt["route_probe"] = {"position": parsed_probe[0], "layer": parsed_probe[1], "output": "route-probe.json"}
     if generate:
         receipt["generation"] = _require_generation(output / "generation.json", token_ids, generate, parsed_eos)
         expected = token_ids + receipt["generation"]["generated_token_ids"][:-1]
@@ -402,9 +504,13 @@ def main() -> int:
     parser.add_argument("--generate", type=int, default=0)
     parser.add_argument("--eos", help="comma-separated EOS IDs; required with --generate")
     parser.add_argument("--bind-file", action="append", type=Path, default=[], help="checkpoint-local frontend file to hash and bind")
+    parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
+    parser.add_argument("--rope-frequency", choices=("native", "original"), default="native")
+    parser.add_argument("--rms-mode", choices=("native", "torch-cuda-order"), default="native")
+    parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     args = parser.parse_args()
     try:
-        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file), indent=2, sort_keys=True))
+        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

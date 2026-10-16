@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CPU FP32 reference runner for the original Ring implementation."""
 from __future__ import annotations
+from contextlib import nullcontext
 import argparse, ast, gc, hashlib, importlib.util, json, mmap, resource, struct, sys, time, types
 from pathlib import Path
 
@@ -166,6 +167,94 @@ def decode_head(hidden, norm, head, logits_mode, decoding_mode, torch):
     normalized = norm(hidden)
     return normalized, torch.matmul(select_logits_hidden(normalized, logits_mode).float(), head.transpose(0, 1).float())
 
+class OperatorProbe:
+    """Observe original modules without replacing their arithmetic."""
+    def __init__(self, layer, position, token_count, module, torch):
+        self.layer, self.position, self.token_count = layer, position, token_count
+        self.module, self.torch = module, torch
+        self.active, self.row, self.calls = False, 0, 0
+        self.stages, self.handles = {}, []
+        self.old_rotary, self.old_softmax = module.apply_rotary_pos_emb, torch.nn.functional.softmax
+
+    def values(self, tensor, heads=False):
+        value = tensor.detach().float()
+        if heads:
+            value = value[0, :, self.row, :]
+        else:
+            value = value[0, self.row]
+        return value.reshape(-1).cpu().tolist()
+
+    def begin(self, _layer, args):
+        hidden = args[0]
+        self.row = self.position if hidden.shape[1] == self.token_count else 0
+        self.active = hidden.shape[1] == self.token_count or self.calls == self.position
+        self.calls += 1
+        if self.active:
+            self.stages['input_hidden'] = self.values(hidden)
+
+    def finish(self, _layer, _args, result):
+        if self.active:
+            self.stages['layer_output'] = self.values(result[0])
+        self.active = False
+
+    def save(self, name, heads=False, before=False):
+        def hook(_module, args, result=None):
+            if self.active:
+                self.stages[name] = self.values(args[0] if before else result, heads)
+        return hook
+
+    def rotary(self, *args, **kwargs):
+        result = self.old_rotary(*args, **kwargs)
+        if self.active:
+            self.stages['query_rotated'] = self.values(result[0], True)
+            self.stages['key_rotated'] = self.values(result[1], True)
+        return result
+
+    def softmax(self, value, *args, **kwargs):
+        result = self.old_softmax(value, *args, **kwargs)
+        if self.active and value.ndim == 4:
+            self.stages['attention_scores'] = value[0, :, self.row, :self.position + 1].detach().float().reshape(-1).cpu().tolist()
+            self.stages['attention_probabilities'] = result[0, :, self.row, :self.position + 1].detach().float().reshape(-1).cpu().tolist()
+        return result
+
+    def cache(self, attention, _args, result):
+        if self.active:
+            cache = result[-1]
+            if cache is None:
+                return
+            keys = cache.key_cache[attention.layer_idx]
+            values = cache.value_cache[attention.layer_idx]
+            self.stages['cache_k'] = keys[0, :, :self.position+1].detach().float().transpose(0, 1).reshape(-1).cpu().tolist()
+            self.stages['cache_v'] = values[0, :, :self.position+1].detach().float().transpose(0, 1).reshape(-1).cpu().tolist()
+
+    def __enter__(self):
+        l = self.layer
+        self.handles += [l.register_forward_pre_hook(self.begin), l.register_forward_hook(self.finish), l.attention.register_forward_hook(self.cache)]
+        pairs = [(l.input_layernorm, 'input_normalized', False, False),
+                 (l.attention.query_key_value, 'qkv_raw', False, False),
+                 (l.attention.dense, 'attention_context', False, True),
+                 (l.attention.dense, 'attention_projected', False, False),
+                 (l.post_attention_layernorm, 'post_attention_hidden', False, True),
+                 (l.post_attention_layernorm, 'gate_input', False, False)]
+        for name in ('query', 'key'):
+            norm = getattr(l.attention, name + '_layernorm', None)
+            if norm is not None:
+                pairs.append((norm, name + '_normalized', True, False))
+        for mod, key, heads, before in pairs:
+            hook = self.save(key, heads, before)
+            self.handles.append(mod.register_forward_pre_hook(hook) if before else mod.register_forward_hook(hook))
+        self.module.apply_rotary_pos_emb = self.rotary
+        self.torch.nn.functional.softmax = self.softmax
+        return self
+
+    def __exit__(self, *_):
+        self.module.apply_rotary_pos_emb = self.old_rotary
+        self.torch.nn.functional.softmax = self.old_softmax
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+        self.layer = None  # Do not retain a GPU decoder after the observed layer.
+
 def run(args):
     try: import torch
     except ImportError as exc: raise ReferenceError("CPU torch is required; installation is not attempted") from exc
@@ -231,9 +320,16 @@ def run(args):
                             }
                     return value
                 layer.mlp.gate.forward = capture
+            observer = OperatorProbe(layer, parsed_probe[0], len(tokens), module, torch) if parsed_probe is not None and layer_no == parsed_probe[1] else None
             try:
-                result = decode_layer(layer, hidden, positions, pos_emb, causal,
-                                      decoding_mode, module.DynamicCache, layer_no, torch)
+                with observer if observer is not None else nullcontext():
+                    result = decode_layer(layer, hidden, positions, pos_emb, causal,
+                                          decoding_mode, module.DynamicCache, layer_no, torch)
+                if observer is not None:
+                    if route_probe_data[0] is None:
+                        raise ReferenceError("operator probe did not capture its router")
+                    route_probe_data[0]["operator_stages"] = observer.stages
+                    route_probe_data[0]["operator_protocol"] = "original module hooks; no arithmetic substituted"
             finally:
                 # Restore the bound method while the layer is still alive.
                 if original is not None:

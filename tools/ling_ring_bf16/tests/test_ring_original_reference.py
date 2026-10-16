@@ -148,6 +148,20 @@ def test_reference_run_reduced_checkpoint_all_and_last(tmp_path):
     assert len(probe["bias_corrected_scores"]) == 4
     assert len(probe["selected_expert_ids"]) == 2
     assert len(probe["selected_weights"]) == 2
+    stages = probe["operator_stages"]
+    assert len(stages["input_hidden"]) == 8
+    assert len(stages["input_normalized"]) == 8
+    assert len(stages["qkv_raw"]) == 16
+    assert len(stages["query_normalized"]) == 8
+    assert len(stages["cache_k"]) == 3 * 1 * 4
+    assert len(stages["attention_scores"]) == 2 * 3
+    assert len(stages["attention_probabilities"]) == 2 * 3
+    plain_args = SimpleNamespace(**vars(args))
+    plain_args.route_probe = None
+    plain_args.output = tmp_path / "cached-without-probe"
+    reference.run(plain_args)
+    for name in ("final_hidden.fp32", "logits.fp32", "hidden_layers.fp32", "layers.json"):
+        assert (plain_args.output / name).read_bytes() == (tmp_path / "out-cached" / name).read_bytes()
     del oracle, module
     gc.collect()
 
@@ -217,3 +231,26 @@ def test_original_two_layer_reduced_geometry_prefill_incremental_and_logits_mode
     assert reference.select_logits_hidden(full.logits, "last").shape == (1, 1, 32)
     del incremental, prefill, full, model, module
     gc.collect()
+
+
+def test_operator_probe_releases_observed_layer():
+    import weakref
+    torch = pytest.importorskip("torch")
+    layer = torch.nn.Module()
+    layer.input_layernorm = torch.nn.Identity()
+    layer.post_attention_layernorm = torch.nn.Identity()
+    layer.attention = torch.nn.Module()
+    for name in ("query_key_value", "dense", "query_layernorm", "key_layernorm"):
+        setattr(layer.attention, name, torch.nn.Identity())
+    module = SimpleNamespace(apply_rotary_pos_emb=lambda q, k, *_: (q, k))
+    old_rotary = module.apply_rotary_pos_emb
+    old_softmax = torch.nn.functional.softmax
+    alive = weakref.ref(layer)
+    observer = reference.OperatorProbe(layer, 0, 1, module, torch)
+    with observer:
+        pass
+    assert module.apply_rotary_pos_emb is old_rotary
+    assert torch.nn.functional.softmax is old_softmax
+    del layer
+    gc.collect()
+    assert alive() is None

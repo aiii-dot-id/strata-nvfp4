@@ -4,9 +4,11 @@
 #include <vector>
 
 namespace strata::ling {
+enum class MlaRopeFrequency { Native, Original };
 struct MlaConfig {
   size_t heads = 16, nope = 128, rope = 64, value = 128;
   float theta = 6000000.0f;
+  MlaRopeFrequency rope_frequency = MlaRopeFrequency::Native;
 };
 class MlaCache {
   MlaConfig config_;
@@ -16,6 +18,7 @@ public:
   MlaCache(MlaConfig config, size_t capacity);
   size_t length() const { return length_; }
   size_t capacity() const { return capacity_; }
+  static float inverse_frequency(const MlaConfig &config, size_t index);
   const std::vector<float> &keys() const { return keys_; }
   const std::vector<float> &values() const { return values_; }
   // Inputs are projected Q, per-head nonrotary K, shared rotary K, V,

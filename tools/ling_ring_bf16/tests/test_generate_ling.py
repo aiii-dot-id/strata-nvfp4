@@ -24,6 +24,30 @@ def test_generation_requires_eos_and_bound(tmp_path):
     with pytest.raises(g.VerificationError):
         g.run_verified(Path('/missing'),Path('/missing'),Path('/missing'),'1',tmp_path/'out2',5,generate=1,eos_ids=[])
 
+def test_rope_frequency_is_forwarded_and_recorded(monkeypatch, tmp_path):
+    for name in ("tokenizer.json", "tokenizer_config.json", "generation_config.json"):
+        (tmp_path / name).write_text("{}")
+    class FakeTokenizer:
+        def apply_chat_template(self, messages, **kwargs): return [1, 2]
+        def decode(self, values, **kwargs): return ""
+    monkeypatch.setattr(g, "_tokenizer", lambda checkpoint: FakeTokenizer())
+    monkeypatch.setattr(g, "_eos_ids", lambda checkpoint, explicit=None: ([9], "explicit"))
+    seen = {}
+    def fake_run(*args, **kwargs):
+        seen["rope_frequency"] = kwargs["rope_frequency"]
+        seen["rms_mode"] = kwargs["rms_mode"]
+        seen["matmul"] = kwargs["matmul"]
+        return {"generation": {"generated_token_ids": [9], "finish_reason": "eos"}, "frontend": {}}
+    monkeypatch.setattr(g, "run_verified", fake_run)
+    result = g.generate(tmp_path, tmp_path / "manifest", tmp_path / "exe", "hello",
+                        tmp_path / "out", 5, 1, rope_frequency="original",
+                        rms_mode="torch-cuda-order", matmul="fp32-cublas")
+    assert seen["rope_frequency"] == "original"
+    assert seen["rms_mode"] == "torch-cuda-order"
+    assert seen["matmul"] == "fp32-cublas"
+    assert result["frontend"]["rope_frequency"] == "original"
+    assert result["frontend"]["rms_mode"] == "torch-cuda-order"
+
 def test_generation_rejects_boolean_budget_and_token(tmp_path):
     p=trace(tmp_path,[3,9])
     value=json.loads(p.read_text())
