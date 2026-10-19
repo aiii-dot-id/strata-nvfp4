@@ -149,7 +149,9 @@ def _checkpoint_files(checkpoint: Path) -> tuple[dict, dict]:
     return files, index_data
 
 
-def _source_files(checkpoint: Path, repo: Path, router: str = "native", executable: Path | None = None, rms_mode: str = "native") -> tuple[dict, dict]:
+def _source_files(checkpoint: Path, repo: Path, router: str = "native", executable: Path | None = None,
+                  rms_mode: str = "native", attention_backend: str = "native",
+                  pointwise: str = "native") -> tuple[dict, dict]:
     original = {}
     for name in ("modeling_bailing_moe_v2.py", "configuration_bailing_moe_v2.py"):
         path = _file(checkpoint / name, f"original source {name}")
@@ -175,9 +177,11 @@ def _source_files(checkpoint: Path, repo: Path, router: str = "native", executab
     if executable is not None:
         executable = _file(executable.resolve(strict=True), "executable")
         paths.append(executable)
-    if router == "torch-cuda" or rms_mode == "torch-cuda":
+    if {router, rms_mode, attention_backend, pointwise} & {"torch-cuda"}:
         paths += [repo / "tools/ling_ring_bf16/torch_router/router.hpp", repo / "tools/ling_ring_bf16/torch_router/router.cpp"]
         if rms_mode == "torch-cuda": paths += [repo / "tools/ling_ring_bf16/torch_router/rms.hpp", repo / "tools/ling_ring_bf16/torch_router/rms.cpp"]
+        if attention_backend == "torch-cuda": paths += [repo / "tools/ling_ring_bf16/torch_router/attention.hpp", repo / "tools/ling_ring_bf16/torch_router/attention.cpp"]
+        if pointwise == "torch-cuda": paths += [repo / "tools/ling_ring_bf16/torch_router/pointwise.hpp", repo / "tools/ling_ring_bf16/torch_router/pointwise.cpp"]
         dynamic = [executable] if executable is not None else []
         seen=set(); closure_names=set()
         while dynamic:
@@ -208,9 +212,10 @@ def _source_files(checkpoint: Path, repo: Path, router: str = "native", executab
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), router: str = "native", rms_mode: str = "native") -> dict:
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), router: str = "native",
+                rms_mode: str = "native", attention_backend: str = "native", pointwise: str = "native") -> dict:
     checkpoint_files, _ = _checkpoint_files(checkpoint)
-    original, relevant = _source_files(checkpoint, repo, router, executable, rms_mode)
+    original, relevant = _source_files(checkpoint, repo, router, executable, rms_mode, attention_backend, pointwise)
     frontend = {}
     for path in binding_files:
         path = _file(Path(path), "frontend binding")
@@ -341,7 +346,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                  generate: int = 0, eos_ids=None, logits_mode: str = "all", binding_files=(), timeout: float = 1800,
                  route_probe: str | None = None, matmul: str = "bf16-gemv", router: str = "native",
                  attention_order: str = "native", attention_scale: str = "native",
-                 rope_frequency: str = "native", rms_mode: str = "native") -> dict:
+                 rope_frequency: str = "native", rms_mode: str = "native",
+                 attention_backend: str = "native", pointwise: str = "native") -> dict:
     checkpoint = checkpoint.resolve()
     manifest = manifest.resolve()
     executable = executable.resolve()
@@ -368,6 +374,12 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("router must be native or torch-cuda")
     if rms_mode not in {"native", "torch-cuda"}:
         raise VerificationError("rms mode must be native or torch-cuda")
+    if attention_backend not in {"native", "torch-cuda"}:
+        raise VerificationError("attention backend must be native or torch-cuda")
+    if pointwise not in {"native", "torch-cuda"}:
+        raise VerificationError("pointwise backend must be native or torch-cuda")
+    if attention_backend == "torch-cuda" and (attention_order != "native" or attention_scale != "native"):
+        raise VerificationError("torch-cuda attention owns the source attention order and scale")
     if generate and logits_mode != "all":
         raise VerificationError("generation requires logits_mode all")
     if not generate:
@@ -398,13 +410,17 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
             raise VerificationError("requested manifest differs from freshly prepared manifest")
 
     manifest_hash = _sha(manifest)
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), manifest_hash,
             "--matmul", matmul]
     if router != "native":
         argv += ["--router", router]
     if rms_mode != "native":
         argv += ["--rms-mode", rms_mode]
+    if attention_backend != "native":
+        argv += ["--attention-backend", attention_backend]
+    if pointwise != "native":
+        argv += ["--pointwise", pointwise]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos)), "--logits-mode", logits_mode]
     elif logits_mode != "all":
@@ -421,7 +437,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     if not output.is_dir():
         raise VerificationError("Ring executable did not create output directory")
 
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
     execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul)
@@ -431,6 +447,10 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("execution RoPE frequency mode mismatch")
     if execution.get("rms_backend", "native") != rms_mode:
         raise VerificationError("execution RMS backend mismatch")
+    if execution.get("attention_backend", "native") != attention_backend:
+        raise VerificationError("execution attention backend mismatch")
+    if execution.get("pointwise_backend", "native") != pointwise:
+        raise VerificationError("execution pointwise backend mismatch")
     if execution.get("attention_value_order", "native") != attention_order or execution.get("attention_score_scale", "native") != attention_scale:
         raise VerificationError("execution attention arithmetic profile mismatch")
     native = {}
@@ -458,7 +478,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         "matmul_backend": matmul,
         "rope_frequency": rope_frequency,
         "attention_value_order": attention_order, "attention_score_scale": attention_scale,
-        "rms_mode": rms_mode,
+        "rms_mode": rms_mode, "attention_backend": attention_backend, "pointwise_backend": pointwise,
         "execution": execution,
         "native_outputs": native,
         "scope": {
@@ -492,6 +512,8 @@ def main() -> int:
     parser.add_argument("--rope-frequency", choices=("native", "original"), default="native")
     parser.add_argument("--router", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--rms-mode", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--attention-backend", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--attention-order", choices=("native", "normalized-first"), default="native")
     parser.add_argument("--attention-scale", choices=("native", "divide"), default="native")
     parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
@@ -505,7 +527,8 @@ def main() -> int:
                                      args.generate, args.eos, args.logits_mode, binding_files=args.bind_file,
                                      timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul, router=args.router,
                                      attention_order=args.attention_order, attention_scale=args.attention_scale,
-                                     rope_frequency=args.rope_frequency, rms_mode=args.rms_mode), indent=2, sort_keys=True))
+                                     rope_frequency=args.rope_frequency, rms_mode=args.rms_mode,
+                                     attention_backend=args.attention_backend, pointwise=args.pointwise), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

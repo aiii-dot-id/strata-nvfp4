@@ -2,6 +2,8 @@
 
 AI Identity Incorported <james@aiii.id>
 
+Current qualification is in the 2026-10-19 section below. Earlier failures are retained historical measurements, not the current status of the new opt-in profiles.
+
 This record covers the opt-in `ling-ring-bf16` path on dev8's RTX 4070 Ti.
 Original BF16 checkpoint values and existing F32 metadata are retained; working
 activations are FP32. No weights are quantized, trained, exported, or promoted.
@@ -264,3 +266,50 @@ source-freeze rejection is not a model parity result.
 
 The main dev8 AII process identity is checked before and after each admitted
 run. No serving process or voice worker was terminated for these tests.
+
+
+## Current composed operator profiles, 2026-10-19
+
+The new opt-in profiles pass the retained failing traces with the same comparison
+thresholds. All original BF16 checkpoint files were hashed before and after each
+run. BF16 expert caching and FP32 working activations remain in use. No weights
+were quantized, trained, exported, or promoted, and the Mac runtime was not used.
+
+| Profile and trace | Positions | Ordered routes | Route mismatches | Strict result |
+|---|---:|---:|---:|---|
+| Ring composed CUDA operators, long trace | 1,031 | 19,589 | 0 | Pass |
+| Ling composed CUDA operators, retained counterexample | 195 | 4,485 | 0 | Pass |
+| Ling composed CUDA operators, previous positive trace | 358 | 8,234 | 0 | Pass |
+
+Every greedy next-token choice matches the cached original on these traces.
+Intermediate hidden values, final hidden values, logits and route weights pass
+their unchanged absolute-plus-relative tolerances. This is bounded numerical
+parity, not global bitwise equality or evidence of greater model intelligence.
+
+Ring uses `--matmul fp32-cublas --router torch-cuda --rms-mode torch-cuda
+--rope-frequency original --attention-backend torch-cuda --pointwise torch-cuda`.
+The attention backend executes batched CUDA QK, division by the head-dimension
+scale, FP32 softmax and AV. Pointwise operations use CUDA SwiGLU and the original
+three-dimensional expert-weighted reduction. Legacy CPU attention-order/scale
+switches remain at native defaults and are rejected when combined with this
+backend. Enable `RING_ENABLE_CUDA` and `RING_ENABLE_TORCH_ROUTER` to build it.
+
+Ling uses `--matmul fp32-cublas --rms-mode torch-cuda-order --pointwise torch-cuda`.
+Pointwise mode overrides the legacy RMS implementation with actual CUDA RMS,
+and also executes CUDA routing, beta sigmoid, composed KDA output norm/gating,
+SwiGLU and the original expert-weighted reduction. Its KDA recurrence remains
+native C++; the composed output norm is not claimed to be the original fused
+kernel. MLA cache and attention remain native. Enable `LING_ENABLE_CUDA` and
+`LING_ENABLE_TORCH_OPS`. Runtime receipts name the selected operator scope.
+
+Neither profile changes the defaults. The new executables reproduced every
+retained layer, final-hidden, logit and route byte on four-position default
+controls for both models. The full Python suite passed 189 tests. CPU CTests
+passed 7/7 for the Torch Ring build, 3/3 for Torch Ling, and the native-only
+Ring/Ling builds passed 6/6 and 2/2 respectively.
+
+Evidence is under `/work/AI/experiments/strata-parity-repair-20261019-r1/`.
+`CURRENT_NUMERIC_QUALIFICATION.json` records exact comparison-result hashes.
+These first artifacts have an unspecified CMake build type. Optimized Release
+artifacts must pass the same gates before they enter the separate fresh quality
+and efficiency run. Cross-date run times are not a controlled speedup estimate.

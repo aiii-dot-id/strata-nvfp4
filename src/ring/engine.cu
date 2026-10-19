@@ -24,6 +24,8 @@
 #include <strata/ring/tensor_store.hpp>
 #include <vector>
 #ifdef STRATA_TORCH_ROUTER
+#include "attention.hpp"
+#include "pointwise.hpp"
 #include "router.hpp"
 #include "rms.hpp"
 #endif
@@ -126,6 +128,12 @@ static const char *router_backend_name(RouterBackend b) { return b==RouterBacken
 enum class RmsBackend { Native, TorchCuda };
 static RmsBackend parse_rms_backend(const std::string &v) { if(v=="native") return RmsBackend::Native; if(v=="torch-cuda") return RmsBackend::TorchCuda; throw std::invalid_argument("rms mode must be native or torch-cuda"); }
 static const char *rms_backend_name(RmsBackend b) { return b==RmsBackend::TorchCuda ? "torch-cuda" : "native"; }
+enum class AttentionBackend { Native, TorchCuda };
+static AttentionBackend parse_attention_backend(const std::string &v) { if(v=="native") return AttentionBackend::Native; if(v=="torch-cuda") return AttentionBackend::TorchCuda; throw std::invalid_argument("attention backend must be native or torch-cuda"); }
+static const char *attention_backend_name(AttentionBackend b) { return b==AttentionBackend::TorchCuda ? "torch-cuda" : "native"; }
+enum class PointwiseBackend { Native, TorchCuda };
+static PointwiseBackend parse_pointwise_backend(const std::string &v) { if(v=="native") return PointwiseBackend::Native; if(v=="torch-cuda") return PointwiseBackend::TorchCuda; throw std::invalid_argument("pointwise backend must be native or torch-cuda"); }
+static const char *pointwise_backend_name(PointwiseBackend b) { return b==PointwiseBackend::TorchCuda ? "torch-cuda" : "native"; }
 
 static const char *matmul_backend_name(MatmulBackend backend) {
   return backend == MatmulBackend::Fp32Cublas ? "fp32-cublas" : "bf16-gemv";
@@ -338,7 +346,7 @@ int main(int argc, char **argv) {
           "usage: strata_ring_bf16 ROOT MANIFEST "
           "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
           "[--generate N --eos CSV] [--logits-mode all|last] "
-          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-order native|normalized-first] [--attention-scale native|divide]");
+          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-backend native|torch-cuda] [--pointwise native|torch-cuda] [--attention-order native|normalized-first] [--attention-scale native|divide]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
       throw std::runtime_error("refusing existing output directory");
@@ -356,6 +364,8 @@ int main(int argc, char **argv) {
     MatmulBackend matmul_backend = MatmulBackend::Bf16Gemv;
     RouterBackend router_backend = RouterBackend::Native;
     RmsBackend rms_backend = RmsBackend::Native;
+    AttentionBackend attention_backend = AttentionBackend::Native;
+    PointwiseBackend pointwise_backend = PointwiseBackend::Native;
     std::string attention_order = "native", attention_scale = "native", rope_frequency = "native";
     bool has_route_probe = false;
     RouteProbeSpec route_probe{};
@@ -377,6 +387,10 @@ int main(int argc, char **argv) {
         router_backend = parse_router_backend(argv[i + 1]);
       else if (option == "--rms-mode")
         rms_backend = parse_rms_backend(argv[i + 1]);
+      else if (option == "--attention-backend")
+        attention_backend = parse_attention_backend(argv[i + 1]);
+      else if (option == "--pointwise")
+        pointwise_backend = parse_pointwise_backend(argv[i + 1]);
       else if (option == "--rope-frequency")
         rope_frequency = argv[i + 1];
       else if (option == "--attention-scale")
@@ -391,6 +405,8 @@ int main(int argc, char **argv) {
     }
 #ifndef STRATA_TORCH_ROUTER
     if (rms_backend == RmsBackend::TorchCuda) throw std::runtime_error("torch-cuda RMS backend is unavailable in this build");
+    if (attention_backend == AttentionBackend::TorchCuda) throw std::runtime_error("torch-cuda attention backend is unavailable in this build");
+    if (pointwise_backend == PointwiseBackend::TorchCuda) throw std::runtime_error("torch-cuda pointwise backend is unavailable in this build");
 #endif
     if (rope_frequency != "native" && rope_frequency != "original")
       throw std::invalid_argument("rope frequency must be native or original");
@@ -398,6 +414,10 @@ int main(int argc, char **argv) {
       throw std::invalid_argument("attention scale must be native or divide");
     if (attention_order != "native" && attention_order != "normalized-first")
       throw std::invalid_argument("attention order must be native or normalized-first");
+    if (attention_backend == AttentionBackend::TorchCuda &&
+        (attention_order != "native" || attention_scale != "native"))
+      throw std::invalid_argument(
+          "torch-cuda attention owns source QK/softmax/AV order; use native attention-order and attention-scale");
     if (logits_mode != "all" && logits_mode != "last")
       throw std::invalid_argument("logits mode must be all or last");
     if (generate && logits_mode != "all")
@@ -432,8 +452,12 @@ int main(int argc, char **argv) {
 #ifdef STRATA_TORCH_ROUTER
     std::unique_ptr<strata::torch_router::Router> torch_router;
     std::unique_ptr<strata::torch_router::Rms> torch_rms;
+    std::unique_ptr<strata::torch_router::Attention> torch_attention;
+    std::unique_ptr<strata::torch_router::Pointwise> torch_pointwise;
     if (router_backend == RouterBackend::TorchCuda) torch_router = std::make_unique<strata::torch_router::Router>(256, 8, 4, 8, 2.5f, "cuda");
     if (rms_backend == RmsBackend::TorchCuda) torch_rms = std::make_unique<strata::torch_router::Rms>("cuda");
+    if (attention_backend == AttentionBackend::TorchCuda) torch_attention = std::make_unique<strata::torch_router::Attention>("cuda");
+    if (pointwise_backend == PointwiseBackend::TorchCuda) torch_pointwise = std::make_unique<strata::torch_router::Pointwise>("cuda");
 #else
     if (router_backend == RouterBackend::TorchCuda) throw std::runtime_error("torch-cuda router backend is unavailable in this build");
 #endif
@@ -486,6 +510,19 @@ int main(int argc, char **argv) {
       return out;
 #else
       throw std::runtime_error("torch-cuda RMS backend is unavailable in this build");
+#endif
+    };
+    auto apply_swiglu = [&](std::vector<float> gate, const std::vector<float> &up) {
+      if (pointwise_backend == PointwiseBackend::Native)
+        return swiglu(std::move(gate), up);
+#ifdef STRATA_TORCH_ROUTER
+      std::vector<float> out;
+      std::string e;
+      if (!torch_pointwise->swiglu(gate.data(), up.data(), gate.size(), out, e))
+        throw std::runtime_error(e);
+      return out;
+#else
+      throw std::runtime_error("torch-cuda pointwise backend is unavailable in this build");
 #endif
     };
     std::vector<float> probe_gate_input, probe_router_logits, probe_sigmoid,
@@ -541,7 +578,8 @@ int main(int argc, char **argv) {
                                    kw.data(), kv[layer], context.data(), error,
                                    value_order, capture_operator ? &attention_trace : nullptr,
                                    attention_scale == "divide" ? sr::AttentionScoreScale::DivideBySqrt : sr::AttentionScoreScale::ReciprocalSqrt,
-                                   rms_backend == RmsBackend::TorchCuda))
+                                   rms_backend == RmsBackend::TorchCuda,
+                                   attention_backend == AttentionBackend::TorchCuda ? torch_attention.get() : nullptr))
           throw std::runtime_error(error);
         auto projected = mv.apply(store.tensor(pre + "attention.dense.weight"), context);
         if (capture_operator) {
@@ -560,9 +598,16 @@ int main(int argc, char **argv) {
         if (capture_operator) probe_stages["post_attention_hidden"] = h;
         auto x = apply_norm(h, store.tensor(pre + "post_attention_layernorm.weight"));
         if (capture_operator) probe_stages["gate_input"] = x;
-        if (layer == 0)
-          add(h, mlp(mv, store, pre + "mlp.", x));
-        else {
+        if (layer == 0) {
+          if (pointwise_backend == PointwiseBackend::Native)
+            add(h, mlp(mv, store, pre + "mlp.", x));
+          else {
+            auto g = mv.apply(store.tensor(pre + "mlp.gate_proj.weight"), x);
+            auto u = mv.apply(store.tensor(pre + "mlp.up_proj.weight"), x);
+            add(h, mv.apply(store.tensor(pre + "mlp.down_proj.weight"),
+                            apply_swiglu(std::move(g), u)));
+          }
+        } else {
           auto logits = mv.apply(store.tensor(pre + "mlp.gate.weight"), x);
           auto bias = floats(store.tensor(pre + "mlp.gate.expert_bias"));
           if (logits.size() != 256 || bias.size() != 256)
@@ -594,7 +639,9 @@ int main(int argc, char **argv) {
             }
             probe_selected = selected;
           }
-          std::vector<float> mixed(2048, 0);
+          std::vector<float> mixed(2048, 0), expert_outputs;
+          if (pointwise_backend == PointwiseBackend::TorchCuda)
+            expert_outputs.reserve(8 * 2048);
           routes << pos << '\t' << layer;
           for (size_t j = 0; j < 8; ++j) {
             const auto expert = selected.expert_ids[j];
@@ -612,12 +659,30 @@ int main(int argc, char **argv) {
             auto g = mv.apply_device(w, 512, 2048, x);
             auto u = mv.apply_device(w + count, 512, 2048, x);
             auto y = mv.apply_device(w + 2 * count, 2048, 512,
-                                     swiglu(std::move(g), u));
-            for (size_t d = 0; d < mixed.size(); ++d)
-              mixed[d] += y[d] * selected.weights[j];
+                                     apply_swiglu(std::move(g), u));
+            if (pointwise_backend == PointwiseBackend::TorchCuda)
+              expert_outputs.insert(expert_outputs.end(), y.begin(), y.end());
+            else
+              for (size_t d = 0; d < mixed.size(); ++d)
+                mixed[d] += y[d] * selected.weights[j];
+          }
+          if (pointwise_backend == PointwiseBackend::TorchCuda) {
+#ifdef STRATA_TORCH_ROUTER
+            if (!torch_pointwise->weighted_sum(expert_outputs.data(), selected.weights.data(), 8, 2048, mixed, error))
+              throw std::runtime_error(error);
+#else
+            throw std::runtime_error("torch-cuda pointwise backend is unavailable in this build");
+#endif
           }
           routes << '\n';
-          add(mixed, mlp(mv, store, pre + "mlp.shared_experts.", x));
+          if (pointwise_backend == PointwiseBackend::Native)
+            add(mixed, mlp(mv, store, pre + "mlp.shared_experts.", x));
+          else {
+            auto shared_gate = mv.apply(store.tensor(pre + "mlp.shared_experts.gate_proj.weight"), x);
+            auto shared_up = mv.apply(store.tensor(pre + "mlp.shared_experts.up_proj.weight"), x);
+            add(mixed, mv.apply(store.tensor(pre + "mlp.shared_experts.down_proj.weight"),
+                                apply_swiglu(std::move(shared_gate), shared_up)));
+          }
           add(h, mixed);
         }
         if (capture_operator) probe_stages["layer_output"] = h;
@@ -687,6 +752,8 @@ int main(int argc, char **argv) {
             << ",\"rope_frequency\":\"" << rope_frequency << "\""
             << ",\"attention_value_order\":\"" << attention_order << "\""
             << ",\"attention_score_scale\":\"" << attention_scale << "\""
+            << ",\"attention_backend\":\"" << attention_backend_name(attention_backend) << "\""
+            << ",\"pointwise_backend\":\"" << pointwise_backend_name(pointwise_backend) << "\""
             << ",\"matmul_backend\":\""
             << matmul_backend_name(matmul_backend)
             << "\",\"router_backend\":\"" << router_backend_name(router_backend) << "\",\"rms_backend\":\"" << rms_backend_name(rms_backend) << "\",\"cuda_runtime_version\":" << cuda_runtime_version << ",\"matmul_fp32_weight_scratch_bytes\":"

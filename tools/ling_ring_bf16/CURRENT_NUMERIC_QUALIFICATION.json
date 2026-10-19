@@ -3,13 +3,20 @@
   "attribution": "AI Identity Incorported <james@aiii.id>",
   "branch": "ling-ring-bf16",
   "checkpoint_weights_modified": false,
-  "date_utc": "2026-10-16",
+  "date_utc": "2026-10-19",
   "defaults_changed": false,
   "device": "dev8 NVIDIA RTX 4070 Ti sm_89",
   "final_source_readmission": {
     "path": "/work/AI/experiments/ring-final-source-readmission-20261016-r1/FINAL_SOURCE_READMISSION.json",
     "sha256": "74611230ad9c6ebb15acd07c49a929a1e9c4770529f276ed0caf961a6420eba4",
     "size": 2248
+  },
+  "fresh_heldout_quality": {
+    "cases_per_model": 10,
+    "cpu_tests_passed": 11,
+    "normalization_controls": "two valid, eight invalid, and overwrite rejection",
+    "root": "/work/AI/experiments/strata-fresh-heldout-20261019-r1",
+    "status": "prepared_not_run"
   },
   "gates": {
     "hidden_logits": "abs(candidate-reference) <= 0.001 + 0.001 * abs(reference)",
@@ -19,17 +26,225 @@
     "top1": "exact"
   },
   "ling": {
+    "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
+    "default_control_20261019": {
+      "binary_trace_exact": true,
+      "command": [
+        "/work/AI/experiments/ling-strata-20261016/reference-env/bin/python",
+        "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ling_verified.py",
+        "--checkpoint",
+        "/work/AI/checkpoints/Ling-3.0-tiny",
+        "--manifest",
+        "/work/AI/experiments/ling-strata-20261016/admission/manifest.tsv",
+        "--executable",
+        "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ling_bf16",
+        "--tokens",
+        "156890,128,256,1024",
+        "--output",
+        "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-default4",
+        "--cache-mib",
+        "1024",
+        "--timeout",
+        "120"
+      ],
+      "files": {
+        "final-hidden.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "8df60c907a4c6ce5f0fceecbdc59cff3dc263cea451dcf6a150ef0ed9609ef1b"
+        },
+        "layer-0.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "d6b30d41fc17ae5c60d0f160dccbeffbbf5f05dc975aff539fbdf5de129bdba0"
+        },
+        "layer-1.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "50f5a42dcc712ab722771a7795ba3301e95ce01c4f72e53a3d8da49ddcc6d3ff"
+        },
+        "layer-10.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "3855a62d6a5d31bb41c4a440fe10a8c74bc200231f461059f405b63b9484acdd"
+        },
+        "layer-11.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "4c4408e0fa94c04902d9dcbe0c78097cb86571cd12b0644baaa76f2c318ab090"
+        },
+        "layer-12.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "df47e1968ad701c81fc4539c1b19f1c05881e58d48bb4f6e8dc671ef1036354f"
+        },
+        "layer-13.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "2877d97eabbf37e0bf8edc5ea6eeb24321604f8a030163f4f033d01c81e0bdf0"
+        },
+        "layer-14.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "d4e053451af6249893a3b86be1bba7226d26b33ef7a8919b3c4c98c74b2f1d96"
+        },
+        "layer-15.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "a254af26c02d77fc6e4724259e783f62330d67508394cc5bbe43f1c8296f8388"
+        },
+        "layer-16.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "b24c64c504cf6b6a6fd0b3cf632b35cf74ad274b56b8fe4eb13e1b096dd33e1e"
+        },
+        "layer-17.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "24838beec8ca662d68479abdbde162d1807ec19eb1e51dc049988e8b79bad917"
+        },
+        "layer-18.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "93fea2a353a6595479594469541635118b94c74935ea6a84a1c12e834c388958"
+        },
+        "layer-19.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "c361e3fbdb97e77c391f33e355859518ae9594b4fcdd7def168cf2d17723f0d9"
+        },
+        "layer-2.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "b239d0e5ffd1a18554a1bc66f241ccb2907bb51d7228d889bb9cb2f2eacf92c9"
+        },
+        "layer-20.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "f1736365c823fe7482db5ae8353c26637a694eac9f12f90478ebe998f57f9738"
+        },
+        "layer-21.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "6813ff1d0fa683eb91d701fa0d706d1e1d91f7b836240eca58f04fa0c8cf863d"
+        },
+        "layer-22.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "136b9a0ba10147995caf2e76c07f5c6098451d5cc3517e7577cab68f0863ceb8"
+        },
+        "layer-23.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "18c8eb48c1c5ec74472c21c826989f8cf2b4baffd56840b483dcf9fe30375fc1"
+        },
+        "layer-3.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "76d99091652a46952859ba9a1300a33c44d3499d4c42331d76cb993fb06b256f"
+        },
+        "layer-4.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "552a73572a6f4fd8dba370fdc6e8323876c8c92a3fbf3a083aef50c6f1b69832"
+        },
+        "layer-5.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "92ff3550a26adc54c13c35b2f842f6c50084a0c32e739399820ff1bb11f6ee78"
+        },
+        "layer-6.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "a457a300757769a145aba18ec76141b5b8e2c77729a2e43cc242917333562aa0"
+        },
+        "layer-7.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "ae7fd53ba388554aa02560fc114865c45bf163860877e6720e642fcebd09823b"
+        },
+        "layer-8.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "1b9a162eb790ea2f60075780dcef3da15ab17ec72e309e8c70d27cc80d78bf58"
+        },
+        "layer-9.f32": {
+          "actual_bytes": 24576,
+          "exact": true,
+          "expected_bytes": 24576,
+          "sha256": "e3d199ca70ff0366e19d6d8392bcbf09f4ada8adcbc99db41448ce64f52712fb"
+        },
+        "logits.f32": {
+          "actual_bytes": 2514944,
+          "exact": true,
+          "expected_bytes": 2514944,
+          "sha256": "eed23a5c443effbbd914f882b97260aba0ae78cd16224d588e0301d591b46c98"
+        },
+        "routes.tsv": {
+          "exact": true,
+          "sha256": "8037ef089824b1732435cabadee5f279526f7e958ed78ffef78e5136d68091fb"
+        }
+      },
+      "full_wall_seconds": 23.38026250799885,
+      "returncode": 0,
+      "tokens": [
+        156890,
+        128,
+        256,
+        1024
+      ]
+    },
     "default_control_trace_files_bitwise": 27,
     "fresh_195_trace": {
-      "ordered_mismatches": 29,
+      "max_errors": {
+        "final_hidden_max_abs": 2.8967857360839844e-05,
+        "hidden_layers_max_abs": 0.0001983642578125,
+        "logits_max_abs": 6.401538848876953e-05,
+        "route_weight_max_abs": 6.3773415069356965e-06
+      },
+      "ordered_mismatches": 0,
       "ordered_routes": 4485,
-      "strict_pass": false,
+      "result": {
+        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
+        "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+        "size": 569
+      },
+      "strict_pass": true,
+      "tokens": 195,
       "top1_exact": true
     },
     "generation_controls": {
       "scope": "development controls, including one stopping control",
       "strict_passed": 6,
       "strict_total": 7
+    },
+    "historical_pre_20261019_profile": {
+      "matmul": "fp32-cublas",
+      "rms_mode": "torch-cuda-order"
     },
     "inventory": {
       "path": "/work/AI/experiments/ling-parity-summary-20261016.json",
@@ -43,17 +258,57 @@
       "strict_pass": true,
       "top1_exact": true
     },
-    "profile": {
-      "matmul": "fp32-cublas",
-      "rms_mode": "torch-cuda-order"
+    "qualified_cases_20261019": {
+      "ling-195": {
+        "max_errors": {
+          "final_hidden_max_abs": 2.8967857360839844e-05,
+          "hidden_layers_max_abs": 0.0001983642578125,
+          "logits_max_abs": 6.401538848876953e-05,
+          "route_weight_max_abs": 6.3773415069356965e-06
+        },
+        "ordered_mismatches": 0,
+        "ordered_routes": 4485,
+        "result": {
+          "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
+          "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+          "size": 569
+        },
+        "strict_pass": true,
+        "tokens": 195,
+        "top1_exact": true
+      },
+      "ling-358": {
+        "max_errors": {
+          "final_hidden_max_abs": 1.1682510375976562e-05,
+          "hidden_layers_max_abs": 0.00011444091796875,
+          "logits_max_abs": 3.0040740966796875e-05,
+          "route_weight_max_abs": 2.503205993598101e-06
+        },
+        "ordered_mismatches": 0,
+        "ordered_routes": 8234,
+        "result": {
+          "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
+          "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
+          "size": 570
+        },
+        "strict_pass": true,
+        "tokens": 358,
+        "top1_exact": true
+      }
     },
-    "status": "partial"
+    "qualified_operator_profile_20261019": {
+      "--matmul": "fp32-cublas",
+      "--pointwise": "torch-cuda",
+      "--rms-mode": "torch-cuda-order"
+    },
+    "status": "bounded_strict_parity_passed"
   },
-  "next_discriminator": "Earliest same-input upstream CUDA-operator difference before fresh Ling position46/layer13 expert-set change; Ring hidden/route-weight rounding remains unresolved.",
+  "next_discriminator": "Qualify optimized Release artifacts against the same retained gates, then execute the CPU-qualified fresh ten-case-per-model quality and efficiency protocol.",
   "promotion": false,
   "quantized": false,
   "repository": "/work/AI/src/strata-ling-ring-bf16",
   "ring": {
+    "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
     "cuda_rms_1031_and_source_ordered_1031": "not_run_after_short_gate_failure",
     "cuda_rms_173": {
       "ordered_mismatches": 1,
@@ -64,6 +319,173 @@
       "ordered_routes": 19589,
       "strict_pass": false,
       "top1_exact": true
+    },
+    "default_control_20261019": {
+      "binary_trace_exact": true,
+      "command": [
+        "/work/AI/experiments/ring-strata-20261016/cuda-reference-env/bin/python",
+        "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ring_verified.py",
+        "--checkpoint",
+        "/work/AI/checkpoints/Ring-mini-2.0",
+        "--manifest",
+        "/work/AI/experiments/ring-strata-20261016/admission/manifest.tsv",
+        "--executable",
+        "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ring_bf16",
+        "--tokens",
+        "157151,39,116171,157152",
+        "--output",
+        "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-default4",
+        "--cache-mib",
+        "1024",
+        "--timeout",
+        "120"
+      ],
+      "files": {
+        "final-hidden.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "d6c909c87078e917948e53a67b31304760c08f9ea65023d7eeb3126e9abb0629"
+        },
+        "layer-0.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "cd2f61cd03db796c2c7c95fdfe62a04de0616d6622995e57714eafe32d604cc6"
+        },
+        "layer-1.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "4a0a448bc5fde3e4bf520c5596bb079681114ffc640ee2efd8a0ca69b70aad07"
+        },
+        "layer-10.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "9b7dbef3f038be00f13e660966135cca8c3f23acc3195449a47b123a62acdb0d"
+        },
+        "layer-11.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "76bf8dbcfd5a8e230851d962aaf7007483723ec8782cce03eee1dc36d799a9ac"
+        },
+        "layer-12.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "a42edc974d5a3cc67f9a3234059757178a46f40024f36e180b3bb902d7dd59bc"
+        },
+        "layer-13.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "1e9ef0d5f7908b2687e7f0173f458c1eeebc341d37d1ca3c49961b61a9d9e6cb"
+        },
+        "layer-14.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "27bf6eda7ef962374eee460663e7e8da8eef1ee9cab935070b7ebb0b38068937"
+        },
+        "layer-15.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "9a3fda819d33ee544dfc60b66ee14cd6d7f9a5155571a743d22f985eb1c837a1"
+        },
+        "layer-16.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "bef01336bc19ce72e2ec1dd033b3739a584d36b21af6c5789267949ce930deec"
+        },
+        "layer-17.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "8f059e41f7def7e351bf0806c21f3c877bffb64ffb60267013ee1efcb9f1669b"
+        },
+        "layer-18.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "1e20801ba7191b4892a2be43ca06bf12841a852ff10d1022b37a34c6188dcd89"
+        },
+        "layer-19.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "1ae71770e3396264b8a943855100574c2416da7c1b180e02c4064a3bc73edc23"
+        },
+        "layer-2.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "089b81923057696a4b69329995ad49bac5baa20d141c54985d93fc66e975cc6f"
+        },
+        "layer-3.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "590670cf8343104233c65f64ea54c15476f7169a15ba7f071a5291378fd2715b"
+        },
+        "layer-4.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "2b134833ff7874c7222bc37c1d936447bf00faa60a3635fb4c5bb1fc416cdfd8"
+        },
+        "layer-5.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "70eb9400265c669765a57a814155b125636e82f35b2a2af04b925063f84b5e7f"
+        },
+        "layer-6.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "1e44d443302e55b345ae9f693e47931074cc58ddfcbb3bb885792ad92a552d51"
+        },
+        "layer-7.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "a111b000328297780da6d919555c0ca38b1f395b592c96e3c7a448843bb0a038"
+        },
+        "layer-8.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "bdbb25ce4c259d68bababd3de30f11b921578ae5a72efd5d17f8f03f93301c3f"
+        },
+        "layer-9.f32": {
+          "actual_bytes": 32768,
+          "exact": true,
+          "expected_bytes": 32768,
+          "sha256": "f20b5f0a07f6f5bdecb8e679377651747327b017b7941ea4c796364524976b04"
+        },
+        "logits.f32": {
+          "actual_bytes": 2514944,
+          "exact": true,
+          "expected_bytes": 2514944,
+          "sha256": "7e1f4b562ff32ae47876e70779f40b04ac26db97cf25d09ff3c27f4c1fcd72ee"
+        },
+        "routes.tsv": {
+          "exact": true,
+          "sha256": "3ba41a20d91178536f0ae3197839b12e8160dac7318965e3c5b6640a951b3bdc"
+        }
+      },
+      "full_wall_seconds": 117.91802036203444,
+      "returncode": 0,
+      "tokens": [
+        157151,
+        39,
+        116171,
+        157152
+      ]
     },
     "default_control_trace_files_bitwise": 23,
     "frequency_only_failed_positions": [
@@ -80,15 +502,43 @@
       "size": 19381
     },
     "isolated_repair": "FP32 RoPE inverse-frequency metadata index2",
+    "qualified_cases_20261019": {
+      "ring-1031": {
+        "max_errors": {
+          "final_hidden_max_abs": 0.000698089599609375,
+          "hidden_layers_max_abs": 0.0118408203125,
+          "logits_max_abs": 0.000308990478515625,
+          "route_weight_max_abs": 4.684856506353974e-05
+        },
+        "ordered_mismatches": 0,
+        "ordered_routes": 19589,
+        "result": {
+          "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
+          "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
+          "size": 649
+        },
+        "strict_pass": true,
+        "tokens": 1031,
+        "top1_exact": true
+      }
+    },
+    "qualified_operator_profile_20261019": {
+      "--attention-backend": "torch-cuda",
+      "--matmul": "fp32-cublas",
+      "--pointwise": "torch-cuda",
+      "--rms-mode": "torch-cuda",
+      "--rope-frequency": "original",
+      "--router": "torch-cuda"
+    },
     "source_ordered_fp32_173": {
       "ordered_mismatches": 0,
       "strict_pass": false,
       "top1_exact": true
     },
-    "status": "partial"
+    "status": "bounded_strict_parity_passed"
   },
   "schema": "strata-ling-ring-numeric-qualification-v1",
-  "scope": "Bounded cached-original CUDA parity; no capability, training, performance or production qualification claim.",
+  "scope": "Bounded original-cached CUDA parity and four-position default preservation only. Fresh quality, efficiency, training, and production admission remain distinct gates.",
   "selected_evidence": [
     {
       "path": "/work/AI/experiments/ring-torch-qualification-20261016-r2/1031-bf16-gemv/RESULT.json",
@@ -139,24 +589,39 @@
       "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/answer-control.json",
       "sha256": "adbffa14ac2fc86aa1359338a1504d4f1dcb76f4819b4251a9b51373d706f64c",
       "size": 6174
+    },
+    {
+      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
+      "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
+      "size": 649
+    },
+    {
+      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
+      "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+      "size": 569
+    },
+    {
+      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
+      "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
+      "size": 570
     }
   ],
   "serving_interrupted": false,
-  "starting_commit": "a2c762ab02659c6b65a27721dd038fc4cfda655a",
-  "status": "partial_strict_qualification_not_complete",
+  "starting_commit": "b399029efac8070e4be0166d0a8969485ae256f5",
+  "status": "bounded_strict_parity_passed_release_and_fresh_quality_pending",
   "tests": {
-    "ling_ctest_passed": 2,
+    "ling_ctest_passed": 3,
     "no_torch_build_and_cpu_rejection": {
       "path": "/work/AI/experiments/ring-native-rms-guard-build/NO_TORCH_BUILD_RECEIPT.json",
       "sha256": "07e080a827c2e6f2742f176ba9597e52ae68c4152a1439a3630d2cc24f438004",
       "size": 3557
     },
     "python_log": {
-      "path": "/work/AI/experiments/full-bf16-toolchain-20261016.log",
-      "sha256": "5c0885e82fa1137cfc213c1f8eae098632f458a5415ed140139ac65b56ed28ba",
+      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/CPU-TESTS.log",
+      "sha256": "c0c45b6db4e1efe116b5322f7b239ed6ea9a94ab37c53adbb4541d46138614c4",
       "size": 1565
     },
-    "python_passed": 183,
+    "python_passed": 189,
     "ring_ctest_passed": 7
   }
 }

@@ -186,7 +186,7 @@ def _dynamic_library_closure(executable: Path, require_cublas: bool) -> dict:
         raise VerificationError("fp32-cublas executable closure has no libcublas.so")
     return {"external:" + str(path): _pin(path, "dynamic library") for path in sorted(paths)}
 
-def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, matmul: str = "bf16-gemv") -> tuple[dict, dict]:
+def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, matmul: str = "bf16-gemv", pointwise: str = "native") -> tuple[dict, dict]:
     original = {name: _pin(checkpoint / name, f"original source {name}") for name in
                 ("modeling_bailing_moe_v3.py", "configuration_bailing_moe_v3.py")}
     # Keep this closure aligned with ling/CMakeLists.txt.  The Ling CUDA
@@ -207,6 +207,7 @@ def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, 
         repo / "src/kernels/cuda/s26_tsum.cuh",
         repo / "tools/ling_ring_bf16/prepare_ling_manifest.py",
         repo / "tools/ling_ring_bf16/ling/CMakeLists.txt",
+        *sorted((repo / "tools/ling_ring_bf16/ling").glob("ling_torch_ops.*")),
         repo / "tools/ling_ring_bf16/run_ling_verified.py",
         repo / "tools/ling_ring_bf16/generate_ling.py",
     ]
@@ -218,15 +219,15 @@ def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, 
         seen.add(path)
         rel = str(_file(path, "relevant source").relative_to(repo))
         relevant[rel] = _pin(path, "relevant source")
-    if matmul == "fp32-cublas":
+    if matmul == "fp32-cublas" or pointwise == "torch-cuda":
         if executable is None:
-            raise VerificationError("fp32-cublas requires an executable for library binding")
-        relevant.update(_dynamic_library_closure(executable, True))
+            raise VerificationError("opt-in backend requires an executable for library binding")
+        relevant.update(_dynamic_library_closure(executable, matmul == "fp32-cublas"))
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), matmul: str = "bf16-gemv") -> dict:
-    original, relevant = (_source_files(checkpoint, repo) if matmul == "bf16-gemv" else _source_files(checkpoint, repo, executable, matmul))
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
+    original, relevant = (_source_files(checkpoint, repo) if matmul == "bf16-gemv" and pointwise == "native" else _source_files(checkpoint, repo, executable, matmul, pointwise))
     frontend = {}
     for path in binding_files:
         path = _file(Path(path), "frontend binding")
@@ -265,11 +266,13 @@ def _parse_route_probe(text: str) -> tuple[int, int]:
 
 def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
                        generate: int = 0, rope_frequency: str = "native",
-                       rms_mode: str = "native", matmul: str = "bf16-gemv") -> dict:
+                       rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
     execution = _read_json(path, "execution receipt")
     expected = {"status": "executed", "model": MODEL, "activation_dtype": "FP32",
                 "quantized": False, "layers": LAYERS, "checkpoint_id": checkpoint_id,
                 "rope_frequency": rope_frequency, "rms_mode": rms_mode, "matmul_backend": matmul}
+    if execution.get("pointwise_mode", "native") != pointwise:
+        raise VerificationError("execution receipt mismatch: pointwise_mode")
     for key, value in expected.items():
         if execution.get(key) != value:
             raise VerificationError(f"execution receipt mismatch: {key}")
@@ -414,7 +417,7 @@ def _native_outputs(output: Path, tokens: int, generation: bool = False, route_p
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path,
                  cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None,
                  binding_files=(), route_probe=None, rope_frequency: str = "native",
-                 rms_mode: str = "native", matmul: str = "bf16-gemv") -> dict:
+                 rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
     checkpoint, manifest, executable, output = (Path(x).resolve() for x in (checkpoint, manifest, executable, output))
     repo = Path(__file__).resolve().parents[2]
     token_ids = _tokens(tokens)
@@ -425,6 +428,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("rms_mode must be native or torch-cuda-order")
     if matmul not in {"bf16-gemv", "fp32-cublas"}:
         raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
+    if pointwise not in {"native", "torch-cuda"}:
+        raise VerificationError("pointwise must be native or torch-cuda")
     if output.exists():
         raise VerificationError(f"refusing existing output: {output}")
     if type(cache_mib) is not int or not 5 <= cache_mib <= 2048:
@@ -454,23 +459,23 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     checkpoint_id = _sha(manifest)
     if generate and not {"tokenizer.json", "tokenizer_config.json", "generation_config.json"} <= {Path(x).name for x in binding_files}:
         raise VerificationError("generation requires tokenizer and generation-config bindings")
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), checkpoint_id]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos))]
     if parsed_probe:
         argv += ["--route-probe", f"{parsed_probe[0]},{parsed_probe[1]}"]
     argv += ["--rope-frequency", rope_frequency]
-    argv += ["--rms-mode", rms_mode, "--matmul", matmul]
+    argv += ["--rms-mode", rms_mode, "--matmul", matmul, "--pointwise", pointwise]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
     if returncode != 0:
         raise VerificationError(f"Ling executable failed ({returncode}): {stderr.strip()[-2000:]}")
     if not output.is_dir():
         raise VerificationError("Ling executable did not create output directory")
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul)
+    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul, pointwise)
     evaluated_tokens = len(execution.get("token_ids", token_ids))
     native = _native_outputs(output, evaluated_tokens, bool(generate), parsed_probe)
     receipt = {"schema": "strata-ling-verified-run-v1", "status": "verified",
@@ -479,6 +484,9 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                "runtime_libraries": before["runtime_libraries"],
                "manifest": before["manifest"], "executable": before["executable"], "frontend": before["frontend"], "argv": argv,
                "cache_mib": cache_mib, "execution": execution, "native_outputs": native,
+               "pointwise_mode": pointwise,
+               "pointwise_scope": ("native operations" if pointwise == "native" else
+                                   "ATen CUDA general RMS, router selection/weights, KDA beta and composed output norm/gate, SwiGLU, and MoE weighted reduction; KDA recurrence remains native C++"),
                "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, original model/configuration sources, and the Ling build source closure (all Ling sources/headers, shared headers, the three linked Ring translation units, CUDA kernels, CMake, wrapper, and frontend) hashed before and after execution",
                          "reference": "native Ling forward receipt and structural outputs only; no claim of original equivalence, activation quality, or production readiness"}}
     if parsed_probe:
@@ -508,9 +516,10 @@ def main() -> int:
     parser.add_argument("--rope-frequency", choices=("native", "original"), default="native")
     parser.add_argument("--rms-mode", choices=("native", "torch-cuda-order"), default="native")
     parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
+    parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     args = parser.parse_args()
     try:
-        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul), indent=2, sort_keys=True))
+        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul, pointwise=args.pointwise), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

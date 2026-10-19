@@ -25,6 +25,9 @@
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
 #include <vector>
+#ifdef STRATA_LING_TORCH_OPS
+#include "ling_torch_ops.hpp"
+#endif
 
 namespace sr = strata::ring;
 static volatile std::sig_atomic_t cancelled = 0;
@@ -72,8 +75,15 @@ static void finite(const std::vector<float> &x) {
 }
 static std::vector<float> norm(const std::vector<float> &x,
                                const sr::TensorView &weight,
-                               strata::ling::RmsMode mode) {
+                               strata::ling::RmsMode mode
+#ifdef STRATA_LING_TORCH_OPS
+                               , strata::ling_torch::Ops *torch_ops
+#endif
+                               ) {
   shape(weight, {x.size()});
+#ifdef STRATA_LING_TORCH_OPS
+  if (torch_ops) { std::vector<float> output; std::string error; if (!torch_ops->rms_norm(x, floats(weight), output, error)) throw std::runtime_error(error); return output; }
+#endif
   return strata::ling::rms_norm(x, floats(weight), mode);
 }
 static void add(std::vector<float> &x, const std::vector<float> &y) {
@@ -166,9 +176,20 @@ public:
   }
 };
 static std::vector<float> swiglu(std::vector<float> g,
-                                 const std::vector<float> &u) {
+                                 const std::vector<float> &u
+#ifdef STRATA_LING_TORCH_OPS
+                                 , strata::ling_torch::Ops *torch_ops
+#endif
+                                 ) {
   if (g.size() != u.size())
     throw std::runtime_error("SwiGLU geometry");
+#ifdef STRATA_LING_TORCH_OPS
+  if (torch_ops) {
+    std::vector<float> output; std::string error;
+    if (!torch_ops->swiglu(g, u, output, error)) throw std::runtime_error(error);
+    return output;
+  }
+#endif
   for (size_t i = 0; i < g.size(); ++i)
     g[i] = (g[i] / (1 + std::exp(-g[i]))) * u[i];
   finite(g);
@@ -176,11 +197,19 @@ static std::vector<float> swiglu(std::vector<float> g,
 }
 static std::vector<float> mlp(Matvec &mv, const sr::TensorStore &store,
                               const std::string &prefix,
-                              const std::vector<float> &x) {
+                              const std::vector<float> &x
+#ifdef STRATA_LING_TORCH_OPS
+                              , strata::ling_torch::Ops *torch_ops
+#endif
+                              ) {
   auto g = mv.apply(store.tensor(prefix + "gate_proj.weight"), x);
   auto u = mv.apply(store.tensor(prefix + "up_proj.weight"), x);
   return mv.apply(store.tensor(prefix + "down_proj.weight"),
-                  swiglu(std::move(g), u));
+                  swiglu(std::move(g), u
+#ifdef STRATA_LING_TORCH_OPS
+                         , torch_ops
+#endif
+                         ));
 }
 static void write_row(const std::filesystem::path &p,
                       const std::vector<float> &x) {
@@ -280,7 +309,11 @@ struct KdaLayer {
     for (auto *v : {&qc,&kc,&vc,&alog,&dt,&output_norm}) finite(*v);
   }
   std::vector<float> step(Matvec &mv, const sr::TensorStore &store,
-                          const std::string &pre, const std::vector<float> &x) {
+                          const std::string &pre, const std::vector<float> &x
+#ifdef STRATA_LING_TORCH_OPS
+                          , strata::ling_torch::Ops *torch_ops
+#endif
+                          ) {
     auto q=mv.apply(store.tensor(pre+"q_proj.weight"),x);
     auto k=mv.apply(store.tensor(pre+"k_proj.weight"),x);
     auto v=mv.apply(store.tensor(pre+"v_proj.weight"),x);
@@ -288,7 +321,11 @@ struct KdaLayer {
     auto beta=mv.apply(store.tensor(pre+"b_proj.weight"),x);
     if(q.size()!=2048 || k.size()!=2048 || v.size()!=2048 || g.size()!=2048 || beta.size()!=16)
       throw std::runtime_error("KDA projection geometry");
-    for(auto &f:beta) f=sigmoid(f);
+#ifdef STRATA_LING_TORCH_OPS
+    if (torch_ops) { std::vector<float> result; std::string error; if (!torch_ops->sigmoid(beta, result, error)) throw std::runtime_error(error); beta=std::move(result); }
+    else
+#endif
+      for(auto &f:beta) f=sigmoid(f);
     sl::KdaWeights weights{qc.data(),kc.data(),vc.data(),nullptr,nullptr,nullptr,alog.data(),dt.data()};
     std::vector<float> o(2048);
     std::string error;
@@ -296,6 +333,10 @@ struct KdaLayer {
       throw std::runtime_error(error);
     auto gate=mv.apply(store.tensor(pre+"g_proj.weight"),x);
     if(gate.size()!=2048) throw std::runtime_error("KDA output gate geometry");
+ #ifdef STRATA_LING_TORCH_OPS
+    if (torch_ops) { std::vector<float> result; std::string error; if (!torch_ops->kda_output_norm_gate(o, output_norm, gate, 16, 128, result, error)) throw std::runtime_error(error); o=std::move(result); }
+    else
+ #endif
     for(size_t head=0;head<16;++head) {
       std::vector<float> part(o.begin()+head*128,o.begin()+(head+1)*128);
       part=sr::rms_norm(part,output_norm);
@@ -307,15 +348,27 @@ struct KdaLayer {
 static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
                                   const std::string &pre, const std::vector<float> &x,
                                   sl::MlaCache &cache, size_t position,
-                                  sl::RmsMode rms_mode) {
+                                  sl::RmsMode rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+                                  , strata::ling_torch::Ops *torch_ops
+#endif
+                                  ) {
   auto qa=mv.apply(store.tensor(pre+"q_a_proj.weight"),x);
-  qa=norm(qa,store.tensor(pre+"q_a_layernorm.weight"),rms_mode);
+  qa=norm(qa,store.tensor(pre+"q_a_layernorm.weight"),rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+          , torch_ops
+#endif
+          );
   auto q=mv.apply(store.tensor(pre+"q_b_proj.weight"),qa);
   auto compressed=mv.apply(store.tensor(pre+"kv_a_proj_with_mqa.weight"),x);
   if(compressed.size()!=576) throw std::runtime_error("MLA compressed KV geometry");
   std::vector<float> low(compressed.begin(),compressed.begin()+512);
   std::vector<float> rope(compressed.begin()+512,compressed.end());
-  low=norm(low,store.tensor(pre+"kv_a_layernorm.weight"),rms_mode);
+  low=norm(low,store.tensor(pre+"kv_a_layernorm.weight"),rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+           , torch_ops
+#endif
+           );
   auto expanded=mv.apply(store.tensor(pre+"kv_b_proj.weight"),low);
   if(expanded.size()!=4096) throw std::runtime_error("MLA expanded KV geometry");
   std::vector<float> key(2048),value(2048);
@@ -329,14 +382,14 @@ static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
 int main(int argc,char **argv) {
   try {
     if(argc < 7 || (argc - 7) % 2)
-      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order]");
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
 
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
     size_t generate=0; std::vector<int> eos; std::optional<RouteProbe> route_probe;
     sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
     sl::RmsMode rms_mode=sl::RmsMode::Native;
-    std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; std::vector<std::string> options;
+    std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; std::vector<std::string> options;
     for(int i=7;i<argc;i+=2) {
       const std::string option=argv[i];
       if(std::find(options.begin(),options.end(),option)!=options.end()) throw std::invalid_argument("duplicate option");
@@ -354,6 +407,13 @@ int main(int argc,char **argv) {
         rms_mode_name=argv[i+1];
         if(rms_mode_name=="torch-cuda-order") rms_mode=sl::RmsMode::TorchCudaOrder;
         else if(rms_mode_name!="native") throw std::invalid_argument("RMS mode must be native or torch-cuda-order");
+      }
+      else if(option=="--pointwise") {
+        pointwise_name=argv[i+1];
+        if(pointwise_name!="native" && pointwise_name!="torch-cuda") throw std::invalid_argument("pointwise mode must be native or torch-cuda");
+#ifndef STRATA_LING_TORCH_OPS
+        if(pointwise_name=="torch-cuda") throw std::invalid_argument("torch-cuda pointwise mode requires LING_ENABLE_TORCH_OPS");
+#endif
       }
       else throw std::invalid_argument("unknown option");
     }
@@ -379,6 +439,10 @@ int main(int argc,char **argv) {
     if(free<budget+Matvec::workspace_bytes(matmul_backend)+size_t(512)*1024*1024)
       throw std::runtime_error("insufficient free GPU memory; no process will be stopped");
     Matvec mv(matmul_backend);
+#ifdef STRATA_LING_TORCH_OPS
+    std::unique_ptr<strata::ling_torch::Ops> torch_ops;
+    if (pointwise_name == "torch-cuda") torch_ops=std::make_unique<strata::ling_torch::Ops>("cuda");
+#endif
     auto backend=std::make_shared<CudaBackend>();
     sr::ExpertCache cache({budget,24,128},backend);
     sr::ExpertCache::Provider provider=[&](const sr::ExpertKey &key,sr::ExpertPayload &p,std::string &error) {
@@ -417,17 +481,40 @@ int main(int argc,char **argv) {
       for(size_t layer=0;layer<24;++layer) {
         check_cancelled(); const std::string pre="model.layers."+std::to_string(layer)+".";
         const std::vector<float> input_hidden = h;
-        auto a=norm(h,store.tensor(pre+"input_layernorm.weight"),rms_mode);
-        if(kda[layer]) add(h,kda[layer]->step(mv,store,pre+"attention.",a));
-        else add(h,mla_step(mv,store,pre+"attention.",a,*mla[layer],pos,rms_mode));
+        auto a=norm(h,store.tensor(pre+"input_layernorm.weight"),rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+                    , torch_ops.get()
+#endif
+                    );
+        if(kda[layer]) add(h,kda[layer]->step(mv,store,pre+"attention.",a
+#ifdef STRATA_LING_TORCH_OPS
+                                                  , torch_ops.get()
+#endif
+                                                  ));
+        else add(h,mla_step(mv,store,pre+"attention.",a,*mla[layer],pos,rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+                             , torch_ops.get()
+#endif
+                             ));
         const std::vector<float> post_attention_hidden = h;
-        auto x=norm(h,store.tensor(pre+"post_attention_layernorm.weight"),rms_mode);
-        if(layer==0) add(h,mlp(mv,store,pre+"mlp.",x));
+        auto x=norm(h,store.tensor(pre+"post_attention_layernorm.weight"),rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+                    , torch_ops.get()
+#endif
+                    );
+        if(layer==0) add(h,mlp(mv,store,pre+"mlp.",x
+#ifdef STRATA_LING_TORCH_OPS
+                               , torch_ops.get()
+#endif
+                               ));
         else {
           auto logits=mv.apply(store.tensor(pre+"mlp.gate.weight"),x);
           auto bias=floats(store.tensor(pre+"mlp.gate.expert_bias"));
           if(logits.size()!=128 || bias.size()!=128) throw std::runtime_error("router geometry");
           auto selected=sr::route(logits.data(),bias.data(),128,routing);
+#ifdef STRATA_LING_TORCH_OPS
+          if (torch_ops) { std::vector<size_t> ids; std::vector<float> weights, scores, corrected; std::string error; if (!torch_ops->route(logits,bias,ids,weights,scores,corrected,error)) throw std::runtime_error(error); selected.expert_ids=std::move(ids); selected.weights=std::move(weights); }
+#endif
           if(route_probe && route_probe->position==pos && route_probe->layer==layer) {
             probe_gate_input=x; probe_router_logits=logits; probe_bias=bias;
             probe_input_hidden=input_hidden; probe_post_attention_hidden=post_attention_hidden;
@@ -441,7 +528,8 @@ int main(int argc,char **argv) {
             probe_ids=selected.expert_ids; probe_weights=selected.weights;
             probe_captured=true;
           }
-          std::vector<float> mixed(1536,0); routes<<pos<<'\t'<<layer;
+          std::vector<float> mixed(1536,0); std::vector<std::vector<float>> expert_outputs; routes<<pos<<'\t'<<layer;
+          expert_outputs.reserve(8);
           for(size_t j=0;j<8;++j) {
             auto expert=selected.expert_ids[j];routes<<'\t'<<expert<<':'<<selected.weights[j];
             std::string error; auto lease=cache.acquire({identity,uint32_t(layer),uint32_t(expert)},provider,error);
@@ -451,14 +539,33 @@ int main(int argc,char **argv) {
             const auto *w=static_cast<const uint16_t *>(device->weights.p);
             constexpr size_t count=512*1536;
             auto g=mv.apply_device(w,512,1536,x);auto u=mv.apply_device(w+count,512,1536,x);
-            auto y=mv.apply_device(w+2*count,1536,512,swiglu(std::move(g),u));
-            for(size_t d=0;d<mixed.size();++d) mixed[d]+=y[d]*selected.weights[j];
+            auto y=mv.apply_device(w+2*count,1536,512,swiglu(std::move(g),u
+#ifdef STRATA_LING_TORCH_OPS
+                                                               , torch_ops.get()
+#endif
+                                                               ));
+#ifdef STRATA_LING_TORCH_OPS
+            if (torch_ops) expert_outputs.push_back(std::move(y));
+            else
+#endif
+              for(size_t d=0;d<mixed.size();++d) mixed[d]+=y[d]*selected.weights[j];
           }
-          routes<<'\n';add(mixed,mlp(mv,store,pre+"mlp.shared_experts.",x));add(h,mixed);
+#ifdef STRATA_LING_TORCH_OPS
+          if (torch_ops) { std::string error; if (!torch_ops->weighted_sum(expert_outputs, selected.weights, mixed, error)) throw std::runtime_error(error); }
+#endif
+          routes<<'\n';add(mixed,mlp(mv,store,pre+"mlp.shared_experts.",x
+#ifdef STRATA_LING_TORCH_OPS
+                                      , torch_ops.get()
+#endif
+                                      ));add(h,mixed);
         }
         write_row(output/("layer-"+std::to_string(layer)+".f32"),h);
       }
-      h=norm(h,store.tensor("model.norm.weight"),rms_mode);write_row(output/"final-hidden.f32",h);
+      h=norm(h,store.tensor("model.norm.weight"),rms_mode
+#ifdef STRATA_LING_TORCH_OPS
+             , torch_ops.get()
+#endif
+             );write_row(output/"final-hidden.f32",h);
       auto logits=mv.apply(store.tensor("lm_head.weight"),h);write_row(output/"logits.f32",logits);
       if(generation.sampling_position(pos)) generation.sample(pos,logits);
       std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
@@ -482,7 +589,7 @@ int main(int argc,char **argv) {
     std::ostringstream receipt;receipt<<std::setprecision(12)
       <<"{\"status\":\"executed\",\"model\":\"Ling-3.0-tiny\",\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
       <<tokens.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<tokens.size()
-      <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"rope_frequency\":\""<<rope_frequency_name<<"\",\"rms_mode\":\""<<rms_mode_name<<"\",\"cache_budget_bytes\":"<<budget
+      <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"rope_frequency\":\""<<rope_frequency_name<<"\",\"rms_mode\":\""<<rms_mode_name<<"\",\"pointwise_mode\":\""<<pointwise_name<<"\",\"cache_budget_bytes\":"<<budget
       <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
       <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""
       <<",\"host_attention_state_bytes\":"<<(size_t(6)*tokens.size()*16*(192+128)+size_t(18)*(16*128*128+3*2048*4))*sizeof(float)

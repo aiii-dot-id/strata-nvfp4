@@ -60,6 +60,23 @@ struct AttentionTrace {
   }
 };
 
+/// Optional executor for the QK/softmax/AV portion of a one-token attention
+/// call.  Inputs have already received Q/K RMSNorm and RoPE.  The key and
+/// value arrays are [keys, kv_heads, dim], and output arrays are [heads, ...].
+/// The native executor remains the default; this interface lets a diagnostic
+/// backend reproduce a separately qualified operator sequence.
+class AttentionBackend {
+public:
+  virtual ~AttentionBackend() = default;
+  virtual bool forward(const float *query, const float *keys,
+                       const float *values, int64_t heads,
+                       int64_t kv_heads, int64_t dim, int64_t key_count,
+                       std::vector<float> &context,
+                       std::vector<float> &scores,
+                       std::vector<float> &probabilities,
+                       std::string &error) = 0;
+};
+
 class KvCache {
 public:
   KvCache() = default;
@@ -83,7 +100,8 @@ private:
                                       int64_t, const float *, const float *,
                                       KvCache &, float *, std::string &,
                                       AttentionValueOrder, AttentionTrace *,
-                                      AttentionScoreScale, bool);
+                                      AttentionScoreScale, bool,
+                                      AttentionBackend *);
   int64_t capacity_ = 0, length_ = 0, n_head_kv_ = 0, head_dim_ = 0;
   std::vector<float> keys_, values_;
 };
@@ -106,6 +124,6 @@ bool attention_forward_order(
     const float *k_norm, KvCache &cache, float *out, std::string &error,
     AttentionValueOrder value_order, AttentionTrace *trace = nullptr,
     AttentionScoreScale score_scale = AttentionScoreScale::ReciprocalSqrt,
-    bool pre_normalized_qk = false);
+    bool pre_normalized_qk = false, AttentionBackend *backend = nullptr);
 
 } // namespace strata::ring

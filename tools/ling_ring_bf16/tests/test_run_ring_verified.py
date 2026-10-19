@@ -52,6 +52,8 @@ def fake_engine(monkeypatch, mutate=None):
             "checkpoint_id": argv[6], "matmul_backend": matmul,
             "router_backend": argv[argv.index("--router") + 1] if "--router" in argv else "native",
             "rms_backend": argv[argv.index("--rms-mode") + 1] if "--rms-mode" in argv else "native",
+            "attention_backend": argv[argv.index("--attention-backend") + 1] if "--attention-backend" in argv else "native",
+            "pointwise_backend": argv[argv.index("--pointwise") + 1] if "--pointwise" in argv else "native",
             "attention_value_order": argv[argv.index("--attention-order") + 1] if "--attention-order" in argv else "native",
             "attention_score_scale": argv[argv.index("--attention-scale") + 1] if "--attention-scale" in argv else "native",
             "rope_frequency": argv[argv.index("--rope-frequency") + 1] if "--rope-frequency" in argv else "native",
@@ -363,3 +365,19 @@ def test_invalid_rms_mode_refused(tmp_path):
     with pytest.raises(verified.VerificationError, match="rms mode"):
         verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
                               rms_mode="invalid")
+
+def test_torch_attention_and_pointwise_are_forwarded_and_bound(tmp_path, monkeypatch):
+    root, manifest = checkpoint(tmp_path)
+    libs = tmp_path / "torch-libs"; libs.mkdir()
+    for name in ("libtorch_cpu.so", "libtorch_cuda.so", "libc10.so"):
+        (libs / name).write_bytes(b"x")
+    monkeypatch.setattr(verified, "_source_files", lambda checkpoint, repo, router="native", executable=None, rms_mode="native", attention_backend="native", pointwise="native": ({}, {"torch": {"sha256": "x", "size": 1}}))
+    fake_engine(monkeypatch)
+    receipt = verified.run_verified(root, manifest, Path("/bin/true"), "1", tmp_path / "out", 6,
+                                    attention_backend="torch-cuda", pointwise="torch-cuda")
+    assert receipt["attention_backend"] == "torch-cuda"
+    assert receipt["pointwise_backend"] == "torch-cuda"
+    assert receipt["execution"]["attention_backend"] == "torch-cuda"
+    assert receipt["execution"]["pointwise_backend"] == "torch-cuda"
+    assert receipt["argv"][receipt["argv"].index("--attention-backend") + 1] == "torch-cuda"
+    assert receipt["argv"][receipt["argv"].index("--pointwise") + 1] == "torch-cuda"

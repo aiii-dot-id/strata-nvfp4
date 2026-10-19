@@ -60,7 +60,8 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
              cache_mib: int, max_new_tokens: int, system: str | None = None,
              logits_mode: str = "all", timeout: float = 1800, rope_frequency: str = "native",
              attention_order: str = "native", attention_scale: str = "native", rms_mode: str = "native",
-             matmul: str = "bf16-gemv", router: str = "native") -> dict:
+             matmul: str = "bf16-gemv", router: str = "native",
+             attention_backend: str = "native", pointwise: str = "native") -> dict:
     checkpoint = checkpoint.resolve()
     if max_new_tokens < 1 or max_new_tokens > 4096:
         raise VerificationError("max_new_tokens must be in 1..4096")
@@ -70,6 +71,10 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
         raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     if router not in {"native", "torch-cuda"}:
         raise VerificationError("router must be native or torch-cuda")
+    if attention_backend not in {"native", "torch-cuda"}:
+        raise VerificationError("attention backend must be native or torch-cuda")
+    if pointwise not in {"native", "torch-cuda"}:
+        raise VerificationError("pointwise backend must be native or torch-cuda")
     binding = _binding_paths(checkpoint)
     before_bindings = _binding_snapshot(binding)
     eos = _eos_ids(checkpoint)
@@ -92,7 +97,8 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
                            cache_mib, generate=max_new_tokens, eos_ids=eos,
                            logits_mode=logits_mode, binding_files=binding, timeout=timeout,
                            rope_frequency=rope_frequency, attention_order=attention_order, attention_scale=attention_scale,
-                           rms_mode=rms_mode, matmul=matmul, router=router)
+                           rms_mode=rms_mode, matmul=matmul, router=router,
+                           attention_backend=attention_backend, pointwise=pointwise)
     generation_receipt = receipt["generation"]
     generated_ids = generation_receipt["generated_token_ids"]
     try:
@@ -112,6 +118,7 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
         "logits_mode": logits_mode,
         "rope_frequency": rope_frequency, "attention_value_order": attention_order, "attention_score_scale": attention_scale,
         "rms_mode": rms_mode, "matmul_backend": matmul, "router_backend": router,
+        "attention_backend": attention_backend, "pointwise_backend": pointwise,
         "bindings": receipt["frontend"],
     }
     (output / "frontend.json").write_text(json.dumps(frontend, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -136,13 +143,16 @@ def main() -> int:
     parser.add_argument("--rms-mode", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     parser.add_argument("--router", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--attention-backend", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args()
     try:
         result = generate(args.checkpoint, args.manifest, args.executable, args.prompt, args.output,
                           args.cache_mib, args.max_new_tokens, args.system, args.logits_mode, args.timeout,
                           args.rope_frequency, args.attention_order, args.attention_scale, args.rms_mode,
-                          args.matmul, args.router)
+                          args.matmul, args.router, attention_backend=args.attention_backend,
+                          pointwise=args.pointwise)
         print(result["frontend"]["decoded"], end="")
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))

@@ -29,6 +29,7 @@ def test_ling_source_closure_matches_linked_ring_units(tmp_path):
         "include/strata/kernels/pdl.hpp", "src/kernels/cuda/native_bf16.cu",
         "src/kernels/cuda/s26_tsum.cuh", "tools/ling_ring_bf16/prepare_ling_manifest.py",
         "tools/ling_ring_bf16/ling/CMakeLists.txt", "tools/ling_ring_bf16/run_ling_verified.py",
+        "tools/ling_ring_bf16/ling/ling_torch_ops.hpp", "tools/ling_ring_bf16/ling/ling_torch_ops.cpp",
         "tools/ling_ring_bf16/generate_ling.py",
     ]
     for name in required:
@@ -96,7 +97,7 @@ def test_original_rope_frequency_is_bound_in_argv_and_execution(tmp_path, monkey
     receipt = v.run_verified(ck, manifest, exe, "1", tmp_path / "out", 5,
                              rope_frequency="original")
     assert receipt["execution"]["rope_frequency"] == "original"
-    assert receipt["argv"][-6:] == ["--rope-frequency", "original", "--rms-mode", "native", "--matmul", "bf16-gemv"]
+    assert receipt["argv"][-8:] == ["--rope-frequency", "original", "--rms-mode", "native", "--matmul", "bf16-gemv", "--pointwise", "native"]
 
 
 def test_invalid_rope_frequency_fails_closed(tmp_path, monkeypatch):
@@ -111,7 +112,7 @@ def test_torch_cuda_rms_mode_is_bound_in_argv_and_execution(tmp_path, monkeypatc
     receipt = v.run_verified(ck, manifest, exe, "1", tmp_path / "out", 5,
                              rms_mode="torch-cuda-order")
     assert receipt["execution"]["rms_mode"] == "torch-cuda-order"
-    assert receipt["argv"][-4:] == ["--rms-mode", "torch-cuda-order", "--matmul", "bf16-gemv"]
+    assert receipt["argv"][-6:] == ["--rms-mode", "torch-cuda-order", "--matmul", "bf16-gemv", "--pointwise", "native"]
 
 
 def test_invalid_rms_mode_fails_closed(tmp_path, monkeypatch):
@@ -119,6 +120,17 @@ def test_invalid_rms_mode_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(v.VerificationError, match="rms_mode"):
         v.run_verified(ck, manifest, exe, "1", tmp_path / "out", 5,
                        rms_mode="other")
+
+def test_pointwise_receipt_binding_rejects_cross_mode_and_missing_optin(tmp_path, monkeypatch):
+    ck, manifest, exe = fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(v, "_source_files", lambda checkpoint, repo, *args: ({}, {}))
+    original = exe.read_text()
+    exe.write_text(original.replace('"matmul_backend":sys.argv[sys.argv.index("--matmul")+1]', '"matmul_backend":sys.argv[sys.argv.index("--matmul")+1],"pointwise_mode":"torch-cuda"'))
+    with pytest.raises(v.VerificationError, match="pointwise_mode"):
+        v.run_verified(ck, manifest, exe, "1", tmp_path / "native", 5)
+    exe.write_text(original)
+    with pytest.raises(v.VerificationError, match="pointwise_mode"):
+        v.run_verified(ck, manifest, exe, "1", tmp_path / "optin", 5, pointwise="torch-cuda")
 
 
 def test_route_probe_is_forwarded_and_bound(tmp_path, monkeypatch):

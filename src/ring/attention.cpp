@@ -148,7 +148,8 @@ bool attention_forward_order(const AttentionConfig &c, const float *q,
                              KvCache &cache, float *out, std::string &error,
                              AttentionValueOrder value_order,
                              AttentionTrace *trace,
-                             AttentionScoreScale score_scale, bool pre_normalized_qk) {
+                             AttentionScoreScale score_scale, bool pre_normalized_qk,
+                             AttentionBackend *backend) {
   error.clear();
   if (trace)
     trace->clear();
@@ -262,6 +263,64 @@ bool attention_forward_order(const AttentionConfig &c, const float *q,
                 staged_v.data() + (size_t(t) * c.n_head_kv + h) * c.head_dim);
     }
   }
+
+  // The opt-in backend preserves the native cache and Q/K construction while
+  // replacing only the reference expression Q @ K.T / sqrt(d), softmax, P @ V.
+  // It intentionally accepts one token at a time: the Ring executor is causal
+  // tokenwise, and that fixes the original CUDA operator shapes.
+  if (backend) {
+    if (n_tokens != 1) {
+      error = "attention backend requires a one-token causal call";
+      return false;
+    }
+    const int64_t total = position + 1;
+    std::vector<float> transformed_q(size_t(c.n_head) * d);
+    for (int64_t h = 0; h < c.n_head; ++h) {
+      const float *qrow = q + size_t(h) * c.head_dim;
+      float *qdst = transformed_q.data() + size_t(h) * d;
+      if (!((pre_normalized_qk
+                 ? (std::copy(qrow, qrow + c.head_dim, qn.data()),
+                    finite_array(qn.data(), size_t(c.head_dim)))
+                 : rms_norm(qrow, qn.data(), c.head_dim, c.rms_eps, q_norm)) &&
+            rope(qn.data(), qdst, c.head_dim, c.rope_dim, position,
+                 c.rope_theta, c.original_rope_frequency))) {
+        error = "non-finite transformed query";
+        return false;
+      }
+      if (trace) {
+        std::copy(qn.begin(), qn.end(), trace->normalized_q.data() + size_t(h) * d);
+        std::copy(qdst, qdst + c.head_dim,
+                  trace->rotated_q.data() + size_t(h) * d);
+      }
+    }
+    std::vector<float> all_k(size_t(total) * nk * d),
+        all_v(size_t(total) * nk * d), backend_context, backend_scores,
+        backend_probabilities;
+    const size_t old_count = size_t(position) * nk * d;
+    std::copy(cache.key_data(), cache.key_data() + old_count, all_k.begin());
+    std::copy(cache.value_data(), cache.value_data() + old_count, all_v.begin());
+    std::copy(staged_k.begin(), staged_k.end(), all_k.begin() + old_count);
+    std::copy(staged_v.begin(), staged_v.end(), all_v.begin() + old_count);
+    if (!backend->forward(transformed_q.data(), all_k.data(), all_v.data(),
+                          c.n_head, c.n_head_kv, c.head_dim, total,
+                          backend_context, backend_scores,
+                          backend_probabilities, error))
+      return false;
+    if (backend_context.size() != q_count ||
+        backend_scores.size() != size_t(c.n_head) * size_t(total) ||
+        backend_probabilities.size() != backend_scores.size() ||
+        !finite_array(backend_context.data(), backend_context.size()) ||
+        !finite_array(backend_scores.data(), backend_scores.size()) ||
+        !finite_array(backend_probabilities.data(), backend_probabilities.size())) {
+      error = "attention backend returned invalid output geometry";
+      return false;
+    }
+    result = std::move(backend_context);
+    if (trace) {
+      trace->scores = std::move(backend_scores);
+      trace->probabilities = std::move(backend_probabilities);
+    }
+  } else {
 
   for (int64_t t = 0; t < n_tokens; ++t) {
     const int64_t pos = position + t;
@@ -417,6 +476,7 @@ bool attention_forward_order(const AttentionConfig &c, const float *q,
         }
       }
     }
+  }
   }
 
   const size_t off =
