@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,56 @@ def test_frontend_forwards_original_rope_frequency(tmp_path, monkeypatch):
         out, 6, 1, rope_frequency="original")
     assert seen["rope_frequency"] == "original"
     assert result["frontend"]["generated_token_ids"] == [9]
+
+
+def test_frontend_defaults_and_forwards_matmul_router(tmp_path, monkeypatch):
+    root = checkpoint(tmp_path)
+    for name in ("tokenizer.json", "tokenizer_config.json"):
+        (root / name).write_text("{}")
+    monkeypatch.setattr(generate_ring, "_tokenizer", lambda _: Tokenizer())
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(kwargs)
+        return {"generation": {"prompt_token_ids": [1, 2], "generated_token_ids": [9], "finish_reason": "eos"},
+                "frontend": {"generation_config.json": {"sha256": "x"}}}
+
+    monkeypatch.setattr(generate_ring, "run_verified", fake_run)
+    (tmp_path / "out-default").mkdir()
+    result = generate_ring.generate(root, tmp_path / "manifest.tsv", Path("/bin/true"), "hello", tmp_path / "out-default", 6, 1)
+    assert seen[-1]["matmul"] == "bf16-gemv" and seen[-1]["router"] == "native"
+    assert result["frontend"]["matmul_backend"] == "bf16-gemv"
+    (tmp_path / "out-opt").mkdir()
+    result = generate_ring.generate(root, tmp_path / "manifest.tsv", Path("/bin/true"), "hello", tmp_path / "out-opt", 6, 1,
+                                    matmul="fp32-cublas", router="torch-cuda")
+    assert seen[-1]["matmul"] == "fp32-cublas" and seen[-1]["router"] == "torch-cuda"
+    assert result["frontend"]["router_backend"] == "torch-cuda"
+
+
+@pytest.mark.parametrize("field,value", [("matmul", "bad"), ("router", "bad")])
+def test_frontend_rejects_invalid_backend_before_tokenizer(tmp_path, monkeypatch, field, value):
+    root = checkpoint(tmp_path)
+    monkeypatch.setattr(generate_ring, "_tokenizer", lambda _: pytest.fail("tokenizer must not be loaded"))
+    kwargs = {field: value}
+    with pytest.raises(VerificationError, match=field):
+        generate_ring.generate(root, tmp_path / "manifest.tsv", Path("/bin/true"), "hello", tmp_path / "out", 6, 1, **kwargs)
+
+
+def test_main_forwards_matmul_router_flags(tmp_path, monkeypatch, capsys):
+    seen = {}
+
+    def fake_generate(*args, **kwargs):
+        seen["args"] = args
+        seen.update(kwargs)
+        return {"frontend": {"decoded": "answer"}}
+
+    monkeypatch.setattr(generate_ring, "generate", fake_generate)
+    monkeypatch.setattr(sys, "argv", ["generate_ring.py", "--checkpoint", str(tmp_path / "c"), "--manifest", str(tmp_path / "m"),
+                                        "--executable", "/bin/true", "--prompt", "hello", "--output", str(tmp_path / "o"),
+                                        "--cache-mib", "6", "--max-new-tokens", "1", "--matmul", "fp32-cublas", "--router", "torch-cuda"])
+    assert generate_ring.main() == 0
+    assert seen["args"][-2:] == ("fp32-cublas", "torch-cuda")
+    assert capsys.readouterr().out == "answer"
 
 
 def test_frontend_rejects_binding_drift_during_tokenization(tmp_path, monkeypatch):
