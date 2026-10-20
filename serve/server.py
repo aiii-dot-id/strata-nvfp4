@@ -8254,8 +8254,9 @@ def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> in
     svc.stop_token_text = cfg.get("stop_token_text") is not False   # EOS literal: on unless the config says false
     if cfg.get("prevent_sleep") is not None and not isinstance(cfg["prevent_sleep"], bool):
         raise SystemExit(f"[strata] config \"prevent_sleep\" must be true or false, not {cfg['prevent_sleep']!r}")
-    if cfg.get("update_check") is not None and not isinstance(cfg["update_check"], bool):   # this fork
-        raise SystemExit(f"[strata] config \"update_check\" must be true or false, not {cfg['update_check']!r}")
+    for k in ("update_check", "app_ui", "app_ui_open"):  # this fork
+        if cfg.get(k) is not None and not isinstance(cfg[k], bool):
+            raise SystemExit(f"[strata] config \"{k}\" must be true or false, not {cfg[k]!r}")
     from serve.keepawake import KeepAwake
     svc.keep_awake = KeepAwake.create(cfg.get("prevent_sleep") is True)      # #1727: opt-in, Windows only
     if cfg.get("reasoning_effort") is not None:         # #1641: the thinking level of requests that name none
@@ -8433,6 +8434,15 @@ def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> in
         # the browser does, and the main thread must be free to take Ctrl+C and SIGTERM (#1872)
         threading.Thread(target=webbrowser.open, daemon=True, name="strata-open-browser",
                          args=(f"http://{'127.0.0.1' if a.host in ('0.0.0.0', '') else a.host}:{bound_port}/",)).start()
+    from serve import app_ui                             # strata-nvfp4: the new interface beside this server (serve/app_ui.py;
+    app_ui_env = app_ui.config_environ(cfg)             # STRATA_APP_UI, or the run config's "app_ui": true)
+    if app_ui.wanted(app_ui_env):
+        try:
+            from strata_control import fork_release
+            app_ui.start(svc, here, bound_port, version=fork_release.installed_version(ROOT, exe)[0],
+                         update_off=fork_release.disabled(cfg, offline=a.offline) is not None, environ=app_ui_env)
+        except Exception as e:                             # noqa: BLE001 - the server works without it
+            print(f"       new interface: not started ({type(e).__name__}: {e}); the page above works", flush=True)
     if a.engine == "strata":
         start_update_check(svc, cfg, exe, a.offline, owned=a.owner_fd is not None)
     if ready_path is not None or event_sink is not None:

@@ -1,4 +1,5 @@
 import {localeTag} from '../lib/i18n';
+import { attachMode } from '../lib/fork';   // strata-nvfp4
 import { tr } from '../lib/i18n';
 import { useLocation, navigate } from '../lib/router';
 import { useEffect, useState } from 'react';
@@ -72,7 +73,7 @@ export function TasksScreen() {
       <IconBtn name="trash" title={tr("Delete {0}", [currentTask.title])} disabled={pending || !!currentTask.archived} onClick={() => setRemoveTask(true)}/>
       <Btn icon="pencil" disabled={pending || currentTask.status === 'running'} onClick={() => open(currentTask)}>{tr("Edit")}</Btn>
       {tr(currentTask.lastRunAt || currentTask.output || currentTask.error ? <Btn icon="chat" disabled={pending || currentTask.status === 'running'} onClick={() => continueTaskInNewChat(currentTask)}>{tr("Continue in a new chat")}</Btn> : null)}
-      <Btn variant="primary" icon={currentTask.status === 'running' ? 'stop' : 'bolt'} disabled={pending || !loaded && currentTask.status !== 'running'} onClick={() => void action(() => api.post(`/api/tasks/${currentTask.id}/${currentTask.status === 'running' ? 'stop' : 'run'}`))}>{tr(currentTask.status === 'running' ? 'Stop' : 'Run now')}</Btn>
+      {attachMode() ? null /* strata-nvfp4: tasks run with a model the host loads itself */ : <Btn variant="primary" icon={currentTask.status === 'running' ? 'stop' : 'bolt'} disabled={pending || !loaded && currentTask.status !== 'running'} onClick={() => void action(() => api.post(`/api/tasks/${currentTask.id}/${currentTask.status === 'running' ? 'stop' : 'run'}`))}>{tr(currentTask.status === 'running' ? 'Stop' : 'Run now')}</Btn>}
     </div> : null;
     return <Screen title={currentTask ? <span className="sr-only">{currentTask.title}</span> : "Tasks"} sub={currentTask ? undefined : "Run a prompt on a schedule, or whenever you need it."} actions={currentTask ? taskHeader : <div className="tasks-actions"><input className="st-input tasks-search" type="search" aria-label={tr("Search tasks")} placeholder={tr("Search tasks…")} value={query} onChange={e => setQuery(e.target.value)}/><Select ariaLabel={tr("Sort tasks")} value={sort} options={[{ value: 'next', label: 'Next run' }, { value: 'name', label: 'Name' }]} onChange={setSort}/><IconBtn name="plus" title={tr("New task")} onClick={() => open(blank())}/></div>}>
     <div className="tasks-page">
