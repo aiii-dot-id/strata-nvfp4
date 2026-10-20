@@ -93,6 +93,12 @@ public:
   void clear() noexcept { length_ = 0; }
   const float *key_data() const noexcept { return keys_.data(); }
   const float *value_data() const noexcept { return values_.data(); }
+  // Copies exactly the committed rows, never spare capacity.
+  std::vector<float> live_keys() const;
+  std::vector<float> live_values() const;
+  // Validates a complete replacement before mutating this cache.
+  bool restore_live(int64_t length, const std::vector<float> &keys,
+                    const std::vector<float> &values, std::string &error);
 
 private:
   friend bool attention_forward_order(const AttentionConfig &, const float *,

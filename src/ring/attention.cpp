@@ -132,6 +132,26 @@ KvCache::KvCache(int64_t capacity, int64_t n_head_kv, int64_t head_dim)
   values_.resize(n);
 }
 
+std::vector<float> KvCache::live_keys() const {
+  return {keys_.begin(), keys_.begin() + size_t(length_) * size_t(n_head_kv_) * size_t(head_dim_)};
+}
+std::vector<float> KvCache::live_values() const {
+  return {values_.begin(), values_.begin() + size_t(length_) * size_t(n_head_kv_) * size_t(head_dim_)};
+}
+bool KvCache::restore_live(int64_t length, const std::vector<float> &keys,
+                           const std::vector<float> &values, std::string &error) {
+  error.clear();
+  if (length < 0 || length > capacity_) { error = "KV restore length exceeds capacity"; return false; }
+  const size_t n = size_t(length) * size_t(n_head_kv_) * size_t(head_dim_);
+  if (keys.size() != n || values.size() != n) { error = "KV restore payload shape mismatch"; return false; }
+  if (n && (!finite_array(keys.data(), n) || !finite_array(values.data(), n))) { error = "KV restore payload must be finite"; return false; }
+  std::vector<float> next_k(keys), next_v(values);
+  std::copy(next_k.begin(), next_k.end(), keys_.begin());
+  std::copy(next_v.begin(), next_v.end(), values_.begin());
+  length_ = length;
+  return true;
+}
+
 bool attention_forward(const AttentionConfig &c, const float *q, const float *k,
                        const float *v, int64_t n_tokens, int64_t position,
                        const float *q_norm, const float *k_norm, KvCache &cache,

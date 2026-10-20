@@ -78,6 +78,43 @@ size_t MlaCache::live_payload_bytes() const noexcept {
 size_t MlaCache::capacity_payload_bytes() const noexcept {
   return (keys_.size() + values_.size()) * sizeof(float);
 }
+std::vector<float> MlaCache::live_keys() const {
+  const size_t per = config_.heads * (config_.nope + config_.rope);
+  return std::vector<float>(keys_.begin(), keys_.begin() + length_ * per);
+}
+std::vector<float> MlaCache::live_values() const {
+  const size_t per = config_.heads * config_.value;
+  return std::vector<float>(values_.begin(), values_.begin() + length_ * per);
+}
+bool MlaCache::restore_live(size_t length, const std::vector<float> &keys,
+                            const std::vector<float> &values,
+                            std::string &error) {
+  error.clear();
+  const size_t key_per = config_.heads * (config_.nope + config_.rope);
+  const size_t value_per = config_.heads * config_.value;
+  if (length > capacity_ || keys.size() != length * key_per ||
+      values.size() != length * value_per) {
+    error = "MLA continuation state geometry mismatch";
+    return false;
+  }
+  const auto finite = [](const std::vector<float> &v) {
+    return std::all_of(v.begin(), v.end(), [](float x) { return std::isfinite(x); });
+  };
+  if (!finite(keys) || !finite(values)) {
+    error = "MLA continuation state must be finite";
+    return false;
+  }
+  // Stage complete capacity arrays so neither vector nor length changes on an
+  // invalid input or allocation failure.
+  std::vector<float> next_keys(keys_.size(), 0.0f);
+  std::vector<float> next_values(values_.size(), 0.0f);
+  std::copy(keys.begin(), keys.end(), next_keys.begin());
+  std::copy(values.begin(), values.end(), next_values.begin());
+  keys_.swap(next_keys);
+  values_.swap(next_values);
+  length_ = length;
+  return true;
+}
 std::vector<float> MlaCache::step(const std::vector<float> &query,
                                  const std::vector<float> &key_nope,
                                  const std::vector<float> &key_rope,

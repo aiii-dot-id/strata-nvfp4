@@ -289,6 +289,40 @@ int main() {
     finite &= std::isfinite(x);
   check(finite, "Ling geometry output is finite");
 
+  // Snapshot restore must be a deep, all-vector transaction. This is the
+  // unit-level counterpart of an engine continuation rollback.
+  strata::ling::KdaState snapshot_source(c);
+  check(strata::ling::kda_forward(c, q.data(), k.data(), v.data(), gate.data(),
+                                  beta.data(), 2, weights, snapshot_source,
+                                  output.data(), error),
+        "KDA snapshot source advances");
+  std::vector<float> saved_r(snapshot_source.recurrent_data(),
+                             snapshot_source.recurrent_data()+snapshot_source.recurrent_size());
+  std::vector<float> saved_q(snapshot_source.q_conv_data(),
+                             snapshot_source.q_conv_data()+snapshot_source.q_conv_size());
+  std::vector<float> saved_k(snapshot_source.k_conv_data(),
+                             snapshot_source.k_conv_data()+snapshot_source.k_conv_size());
+  std::vector<float> saved_v(snapshot_source.v_conv_data(),
+                             snapshot_source.v_conv_data()+snapshot_source.v_conv_size());
+  strata::ling::KdaState restored(c);
+  check(restored.restore(saved_r, saved_q, saved_k, saved_v, error),
+        "KDA complete snapshot restore succeeds");
+  const auto before_bad_r = std::vector<float>(restored.recurrent_data(),
+      restored.recurrent_data()+restored.recurrent_size());
+  auto bad_q = saved_q; bad_q[0] = std::numeric_limits<float>::quiet_NaN();
+  check(!restored.restore(saved_r, bad_q, saved_k, saved_v, error),
+        "KDA nonfinite snapshot rejected");
+  check(std::equal(before_bad_r.begin(), before_bad_r.end(), restored.recurrent_data()),
+        "KDA failed restore preserves prior state");
+  auto short_v = saved_v; short_v.pop_back();
+  check(!restored.restore(saved_r, saved_q, saved_k, short_v, error),
+        "KDA wrong snapshot geometry rejected");
+  check(std::equal(before_bad_r.begin(), before_bad_r.end(), restored.recurrent_data()),
+        "KDA geometry rejection preserves prior state");
+  saved_r[0] += 1.0f;
+  check(restored.recurrent_data()[0] != saved_r[0],
+        "KDA restored state is independent from snapshot vectors");
+
   std::printf("%s\n", failures ? "FAIL" : "PASS");
   return failures ? 1 : 0;
 }

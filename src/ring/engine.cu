@@ -12,11 +12,13 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
 #include <strata/kernels/bf16_gemv.hpp>
 #include <strata/ring/attention.hpp>
+#include <strata/ring/continuation.hpp>
 #include <strata/ring/expert_cache.hpp>
 #include <strata/ring/generation.hpp>
 #include <strata/ring/numerics.hpp>
@@ -405,6 +407,9 @@ int main(int argc, char **argv) {
     std::string attention_order = "native", attention_scale = "native", rope_frequency = "native";
     bool has_route_probe = false;
     RouteProbeSpec route_probe{};
+    std::filesystem::path state_in, state_out;
+    size_t stop_after = std::numeric_limits<size_t>::max();
+    std::string state_binding;
     std::vector<std::string> options;
     for (int i = 7; i < argc; i += 2) {
       const std::string option = argv[i];
@@ -438,7 +443,11 @@ int main(int argc, char **argv) {
       else if (option == "--route-probe") {
         route_probe = parse_route_probe(argv[i + 1]);
         has_route_probe = true;
-      } else
+      } else if (option == "--state-in") state_in = argv[i + 1];
+      else if (option == "--state-out") state_out = argv[i + 1];
+      else if (option == "--stop-after") stop_after = sr::unsigned_decimal(argv[i + 1]);
+      else if (option == "--state-binding") state_binding = argv[i + 1];
+      else
         throw std::invalid_argument("unknown option");
     }
 #ifndef STRATA_TORCH_ROUTER
@@ -461,9 +470,16 @@ int main(int argc, char **argv) {
     if (generate && logits_mode != "all")
       throw std::invalid_argument(
           "generation requires all logits for validation");
+    const bool continuation_mode = !state_in.empty() || !state_out.empty() ||
+        stop_after != std::numeric_limits<size_t>::max() || !state_binding.empty();
+    if (continuation_mode && (state_binding.size() != 64 || state_binding.find_first_not_of("0123456789abcdef") != std::string::npos))
+      throw std::invalid_argument("continuation requires exact lowercase hex state binding");
+    if (continuation_mode && (has_route_probe || logits_mode != "all"))
+      throw std::invalid_argument("continuation requires all logits and no route probe");
+    if (stop_after != std::numeric_limits<size_t>::max() && state_out.empty())
+      throw std::invalid_argument("stop-after requires state-out");
     sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3], 157184),
                                     generate, eos);
-    const auto &tokens = generation.evaluated();
     if (has_route_probe && route_probe.position >= generation.kv_capacity())
       throw std::invalid_argument("route probe position exceeds evaluation window");
     std::signal(SIGINT, cancel_handler);
@@ -546,7 +562,32 @@ int main(int argc, char **argv) {
     std::vector<sr::KvCache> kv;
     for (int i = 0; i < 20; ++i)
       kv.emplace_back(generation.kv_capacity(), 4, 128);
+    std::vector<float> last_logits;
     sr::AttentionConfig attention;
+    if (!state_in.empty()) {
+      auto state = sr::load_continuation(state_in);
+      sr::require_continuation(state, state_binding, generation.prompt(), generation.kv_capacity());
+      if (state.arrays.size() != 40) throw std::runtime_error("continuation Ring KV array set mismatch");
+      std::vector<sr::KvCache> staged_kv;
+      for (int l=0;l<20;++l) staged_kv.emplace_back(generation.kv_capacity(),4,128);
+      for (int l=0;l<20;++l) {
+        const auto kname="kv."+std::to_string(l)+".k", vname="kv."+std::to_string(l)+".v";
+        auto ki=state.arrays.find(kname), vi=state.arrays.find(vname);
+        if (ki==state.arrays.end() || vi==state.arrays.end()) throw std::runtime_error("continuation Ring KV arrays missing");
+        std::string restore_error;
+        if (!staged_kv[l].restore_live(static_cast<int64_t>(state.position),ki->second,vi->second,restore_error)) throw std::runtime_error(restore_error);
+      }
+      // Do not alter the live caches until every layer has been validated.
+      auto staged_generation = generation;
+      staged_generation.resume_prefix(state.prefix, state.last_logits);
+      auto staged_logits = state.last_logits;
+      kv.swap(staged_kv);
+      generation = std::move(staged_generation);
+      last_logits.swap(staged_logits);
+    }
+    const auto &tokens = generation.evaluated();
+    const size_t start_position = state_in.empty() ? 0 : kv[0].length();
+    if (stop_after < start_position) throw std::invalid_argument("stop-after precedes restored position");
     attention.rope_dim = 64;
     attention.original_rope_frequency = rope_frequency == "original";
     const sr::RouterConfig routing{256, 8, 4, 8, 2.5f};
@@ -583,7 +624,9 @@ int main(int argc, char **argv) {
         probe_bias, probe_corrected;
     sr::RoutingResult probe_selected;
     std::map<std::string, std::vector<float>> probe_stages;
-    for (size_t pos = 0; pos < tokens.size(); ++pos) {
+    size_t processed_position = start_position;
+    for (size_t pos = start_position; pos < tokens.size() && pos < stop_after; ++pos) {
+      processed_position = pos + 1;
       check_cancelled();
       std::vector<float> h(2048);
       for (size_t i = 0; i < h.size(); ++i) {
@@ -754,7 +797,8 @@ int main(int argc, char **argv) {
         write_row(output / "logits.f32", logits);
         const auto top = std::distance(
             logits.begin(), std::max_element(logits.begin(), logits.end()));
-        if (generation.sampling_position(pos))
+        if (continuation_mode) last_logits = logits;
+        if (generation.sampling_position(pos) && pos + 1 < stop_after)
           generation.sample(pos, logits);
         std::cerr << "token " << pos << " complete; top1 " << top << '\n';
       } else if (pos % 64 == 0)
@@ -768,12 +812,45 @@ int main(int argc, char **argv) {
                         probe_gate_input, probe_router_logits, probe_sigmoid,
                         probe_bias, probe_corrected, probe_selected, probe_stages);
     }
-    if (generate) {
+    if (continuation_mode && processed_position == start_position) {
+      for (int layer=0;layer<20;++layer) {
+        std::ofstream empty(output/("layer-"+std::to_string(layer)+".f32"),std::ios::binary);
+        if(!empty) throw std::runtime_error("empty state trace write failed");
+      }
+      for(const char* name:{"final-hidden.f32","logits.f32"}) {
+        std::ofstream empty(output/name,std::ios::binary);
+        if(!empty) throw std::runtime_error("empty state trace write failed");
+      }
+    }
+    const bool paused = processed_position < tokens.size() ||
+        (generate && generation.finish_reason().empty());
+    if (generate && !paused) {
       std::ofstream generated(output / "generation.json");
       generated << generation.receipt();
       generated.flush();
       if (!generated)
         throw std::runtime_error("generation receipt write failed");
+    }
+    if (!state_out.empty()) {
+      if (last_logits.empty() && processed_position) throw std::runtime_error("continuation has no last logits");
+      sr::ContinuationState state{state_binding, processed_position,
+          std::vector<int>(tokens.begin(), tokens.begin()+processed_position), last_logits, {}};
+      for (int l=0;l<20;++l) { state.arrays.emplace("kv."+std::to_string(l)+".k",kv[l].live_keys()); state.arrays.emplace("kv."+std::to_string(l)+".v",kv[l].live_values()); }
+      sr::save_continuation(state_out,state);
+    }
+    if (continuation_mode) {
+      std::ofstream side(output / "continuation.json");
+      side << "{\"start_position\":" << start_position
+           << ",\"processed_position\":" << processed_position
+           << ",\"processed_tokens\":"
+           << (processed_position - start_position)
+           << ",\"paused\":" << (paused ? "true" : "false")
+           << ",\"state_in\":" << (!state_in.empty() ? "true" : "false")
+           << ",\"state_out\":" << (!state_out.empty() ? "true" : "false")
+           << "}\n";
+      side.flush();
+      if (!side)
+        throw std::runtime_error("continuation sidecar write failed");
     }
     auto stats = cache.stats();
     routes.flush();
@@ -781,7 +858,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("route trace write failed");
     std::ostringstream token_json;
     token_json << '[';
-    for (size_t i = 0; i < tokens.size(); ++i) {
+    for (size_t i = 0; i < (continuation_mode ? processed_position : tokens.size()); ++i) {
       if (i)
         token_json << ',';
       token_json << tokens[i];
@@ -791,9 +868,9 @@ int main(int argc, char **argv) {
     receipt << std::setprecision(12)
             << "{\"status\":\"executed\",\"model\":\"Ring-mini-2.0\","
                "\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
-            << tokens.size() << ",\"token_ids\":" << token_json.str()
+            << processed_position << ",\"token_ids\":" << token_json.str()
             << ",\"logits_mode\":\"" << logits_mode << "\",\"logits_tokens\":"
-            << (logits_mode == "all" ? tokens.size() : 1)
+            << (continuation_mode ? processed_position-start_position : (logits_mode == "all" ? tokens.size() : 1))
             << ",\"checkpoint_id\":\"" << identity
             << "\",\"layers\":20,\"cache_budget_bytes\":" << budget
             << ",\"cache_resident_bytes\":" << stats.bytes

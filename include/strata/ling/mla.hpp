@@ -1,6 +1,7 @@
 // AI Identity Incorported <james@aiii.id>
 #pragma once
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace strata::ling {
@@ -18,6 +19,7 @@ public:
   MlaCache(MlaConfig config, size_t capacity);
   size_t length() const { return length_; }
   size_t capacity() const { return capacity_; }
+  const MlaConfig &config() const noexcept { return config_; }
   // Logical payload only. Vectors reserve these slots at construction; live
   // bytes count just the positions committed by step().
   size_t live_payload_bytes() const noexcept;
@@ -25,6 +27,14 @@ public:
   static float inverse_frequency(const MlaConfig &config, size_t index);
   const std::vector<float> &keys() const { return keys_; }
   const std::vector<float> &values() const { return values_; }
+  // The continuation representation contains committed slots only; unused
+  // capacity is deliberately not serialized.
+  std::vector<float> live_keys() const;
+  std::vector<float> live_values() const;
+  // Transactional restore of committed key/value slots. Invalid length,
+  // geometry, or values leave this cache unchanged.
+  bool restore_live(size_t length, const std::vector<float> &keys,
+                    const std::vector<float> &values, std::string &error);
   // Inputs are projected Q, per-head nonrotary K, shared rotary K, V,
   // and one gate logit per head. Projection/norm weights live in the engine.
   // A failed call leaves both cache arrays and length unchanged.

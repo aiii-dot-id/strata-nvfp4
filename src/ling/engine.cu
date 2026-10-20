@@ -19,12 +19,14 @@
 #include <strata/ling/kda.hpp>
 #include <strata/ling/mla.hpp>
 #include <strata/ling/rms.hpp>
+#include <strata/ring/continuation.hpp>
 #include <strata/ring/expert_cache.hpp>
 #include <strata/ring/generation.hpp>
 #include <strata/ring/numerics.hpp>
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
 #include <vector>
+#include <map>
 #ifdef STRATA_LING_TORCH_OPS
 #include "ling_torch_ops.hpp"
 #endif
@@ -408,14 +410,97 @@ static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
   auto context=cache.step(q,key,rope,value,gates,position);
   return mv.apply(store.tensor(pre+"dense.weight"),context);
 }
+static std::string kda_state_name(size_t layer, const char *part) {
+  return "kda." + std::to_string(layer) + "." + part;
+}
+static std::string mla_state_name(size_t layer, const char *part) {
+  return "mla." + std::to_string(layer) + "." + part;
+}
+static void require_ling_state_arrays(const sr::ContinuationState &state) {
+  size_t expected = 0;
+  for (size_t layer = 0; layer < 24; ++layer)
+    expected += layer % 4 == 3 ? 2 : 4;
+  if (state.arrays.size() != expected)
+    throw std::runtime_error("continuation array set mismatch");
+  for (size_t layer = 0; layer < 24; ++layer) {
+    if (layer % 4 == 3) {
+      for (const char *part : {"keys", "values"})
+        if (state.arrays.find(mla_state_name(layer, part)) == state.arrays.end())
+          throw std::runtime_error("missing MLA continuation state");
+    } else {
+      for (const char *part : {"recurrent", "q_conv", "k_conv", "v_conv"})
+        if (state.arrays.find(kda_state_name(layer, part)) == state.arrays.end())
+          throw std::runtime_error("missing KDA continuation state");
+    }
+  }
+}
+static void restore_ling_state(const sr::ContinuationState &state,
+    std::vector<std::unique_ptr<KdaLayer>> &kda,
+    std::vector<std::unique_ptr<sl::MlaCache>> &mla) {
+  require_ling_state_arrays(state);
+  std::vector<std::unique_ptr<KdaLayer>> next_kda(24);
+  std::vector<std::unique_ptr<sl::MlaCache>> next_mla(24);
+  for (size_t layer = 0; layer < 24; ++layer) {
+    std::string error;
+    if (kda[layer]) {
+      next_kda[layer] = std::make_unique<KdaLayer>(*kda[layer]);
+      const auto &a = state.arrays;
+      if (!next_kda[layer]->state.restore(
+              a.at(kda_state_name(layer, "recurrent")),
+              a.at(kda_state_name(layer, "q_conv")),
+              a.at(kda_state_name(layer, "k_conv")),
+              a.at(kda_state_name(layer, "v_conv")), error))
+        throw std::runtime_error(error);
+    } else {
+      next_mla[layer] = std::make_unique<sl::MlaCache>(*mla[layer]);
+      const auto &a = state.arrays;
+      if (!next_mla[layer]->restore_live(size_t(state.position),
+              a.at(mla_state_name(layer, "keys")),
+              a.at(mla_state_name(layer, "values")), error))
+        throw std::runtime_error(error);
+    }
+  }
+  kda.swap(next_kda);
+  mla.swap(next_mla);
+}
+static sr::ContinuationState snapshot_ling_state(
+    const std::string &binding, size_t position, const std::vector<int> &prefix,
+    const std::vector<float> &last_logits,
+    const std::vector<std::unique_ptr<KdaLayer>> &kda,
+    const std::vector<std::unique_ptr<sl::MlaCache>> &mla) {
+  sr::ContinuationState state;
+  state.binding = binding;
+  state.position = position;
+  state.prefix = prefix;
+  state.last_logits = last_logits;
+  for (size_t layer = 0; layer < 24; ++layer) {
+    if (kda[layer]) {
+      const auto &x = kda[layer]->state;
+      state.arrays.emplace(kda_state_name(layer, "recurrent"),
+          std::vector<float>(x.recurrent_data(), x.recurrent_data() + x.recurrent_size()));
+      state.arrays.emplace(kda_state_name(layer, "q_conv"),
+          std::vector<float>(x.q_conv_data(), x.q_conv_data() + x.q_conv_size()));
+      state.arrays.emplace(kda_state_name(layer, "k_conv"),
+          std::vector<float>(x.k_conv_data(), x.k_conv_data() + x.k_conv_size()));
+      state.arrays.emplace(kda_state_name(layer, "v_conv"),
+          std::vector<float>(x.v_conv_data(), x.v_conv_data() + x.v_conv_size()));
+    } else {
+      state.arrays.emplace(mla_state_name(layer, "keys"), mla[layer]->live_keys());
+      state.arrays.emplace(mla_state_name(layer, "values"), mla[layer]->live_values());
+    }
+  }
+  return state;
+}
 int main(int argc,char **argv) {
   try {
     if(argc < 7 || (argc - 7) % 2)
-      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --lm-head-residency off|cuda --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --state-in FILE --state-out FILE --stop-after N --state-binding HEX64 --lm-head-residency off|cuda --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
 
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
     size_t generate=0; std::vector<int> eos; std::optional<RouteProbe> route_probe;
+    std::optional<std::filesystem::path> state_in, state_out;
+    std::optional<size_t> stop_after; std::string state_binding;
     sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
     sl::RmsMode rms_mode=sl::RmsMode::Native;
     std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; LmHeadResidency lm_head_residency=LmHeadResidency::Off; std::vector<std::string> options;
@@ -426,6 +511,10 @@ int main(int argc,char **argv) {
       if(option=="--generate") generate=sr::unsigned_decimal(argv[i+1]);
       else if(option=="--eos") eos=sr::vocabulary_ids(argv[i+1],157184);
       else if(option=="--route-probe") route_probe=parse_route_probe(argv[i+1]);
+      else if(option=="--state-in") state_in=argv[i+1];
+      else if(option=="--state-out") state_out=argv[i+1];
+      else if(option=="--stop-after") stop_after=sr::unsigned_decimal(argv[i+1]);
+      else if(option=="--state-binding") state_binding=argv[i+1];
       else if(option=="--matmul") { matmul_name=argv[i+1]; matmul_backend=parse_matmul_backend(matmul_name); }
       else if(option=="--lm-head-residency") lm_head_residency=parse_lm_head_residency(argv[i+1]);
       else if(option=="--rope-frequency") {
@@ -450,7 +539,12 @@ int main(int argc,char **argv) {
     if(generate>1024) throw std::invalid_argument("generation exceeds 1024-token bound");
     if(generate && eos.empty()) throw std::invalid_argument("generation needs EOS IDs");
     sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3],157184),generate,eos,157184,1024);
-    const auto &tokens=generation.evaluated();
+    const bool continuation_mode = state_in.has_value() || state_out.has_value() || stop_after.has_value() || !state_binding.empty();
+    if (continuation_mode && !sr::continuation_detail::hex64(state_binding))
+      throw std::invalid_argument("continuation mode requires --state-binding HEX64");
+    if (stop_after && !state_out) throw std::invalid_argument("stop-after requires state-out");
+    if (route_probe && continuation_mode)
+      throw std::invalid_argument("route probe is incompatible with continuation mode");
     const size_t cache_mib=sr::unsigned_decimal(argv[5]);
     if(cache_mib<5 || cache_mib>2048) throw std::runtime_error("cache budget must be 5..2048 MiB");
     const std::string identity=argv[6];
@@ -507,6 +601,23 @@ int main(int argc,char **argv) {
         mla[l]=std::make_unique<sl::MlaCache>(config,generation.kv_capacity()); }
       else kda[l]=std::make_unique<KdaLayer>(store,"model.layers."+std::to_string(l)+".attention.");
     }
+    size_t start_position = 0;
+    bool state_loaded = false;
+    if (state_in) {
+      const auto restored = sr::load_continuation(*state_in);
+      sr::require_continuation(restored, state_binding, generation.prompt(),
+                               generation.kv_capacity());
+      // Validate generation reconstruction before replacing any live layer
+      // state. The layer replacement below is itself staged and atomic.
+      auto staged_generation = generation;
+      staged_generation.resume_prefix(restored.prefix, restored.last_logits);
+      restore_ling_state(restored, kda, mla);
+      generation = std::move(staged_generation);
+      start_position = size_t(restored.position);
+      state_loaded = true;
+    }
+    if (stop_after && *stop_after < start_position)
+      throw std::invalid_argument("stop-after precedes restored position");
     const sr::RouterConfig routing{128,8,4,8,2.5f};
     std::vector<float> probe_input_hidden, probe_post_attention_hidden, probe_gate_input, probe_router_logits, probe_sigmoid,
         probe_bias, probe_corrected, probe_weights;
@@ -515,7 +626,11 @@ int main(int argc,char **argv) {
     std::filesystem::create_directories(output);
     std::ofstream routes(output/"routes.tsv"); routes<<std::setprecision(9);
     const auto start=std::chrono::steady_clock::now();
-    for(size_t pos=0;pos<tokens.size();++pos) {
+    size_t processed_position = start_position;
+    std::vector<float> last_committed_logits;
+    for(size_t pos=start_position; pos<generation.evaluated().size() &&
+        (!stop_after || pos < *stop_after); ++pos) {
+      const auto &tokens=generation.evaluated();
       check_cancelled(); std::vector<float> h(1536);
       for(size_t i=0;i<h.size();++i) {
         uint16_t b; std::memcpy(&b,embedding.data+(size_t(tokens[pos])*1536+i)*2,2);h[i]=bf16(b);
@@ -609,10 +724,49 @@ int main(int argc,char **argv) {
 #endif
              );write_row(output/"final-hidden.f32",h);
       auto logits=lm_head_residency==LmHeadResidency::Cuda ? mv.apply_lm_head(h) : mv.apply(lm_head,h);write_row(output/"logits.f32",logits);
+      if (continuation_mode) last_committed_logits = logits;
+      processed_position = pos + 1;
       if(generation.sampling_position(pos)) generation.sample(pos,logits);
       std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
     }
-    check_cancelled(); auto stats=cache.stats(); routes.flush();
+    check_cancelled();
+    if (continuation_mode && processed_position == start_position) {
+      for (int layer=0;layer<24;++layer) {
+        std::ofstream empty(output/("layer-"+std::to_string(layer)+".f32"),std::ios::binary);
+        if(!empty) throw std::runtime_error("empty state trace write failed");
+      }
+      for(const char* name:{"final-hidden.f32","logits.f32"}) {
+        std::ofstream empty(output/name,std::ios::binary);
+        if(!empty) throw std::runtime_error("empty state trace write failed");
+      }
+    }
+    const bool paused = stop_after && processed_position < generation.evaluated().size();
+    if (paused && !state_out)
+      throw std::runtime_error("paused continuation requires --state-out");
+    std::vector<int> committed_prefix(generation.evaluated().begin(),
+                                      generation.evaluated().begin() + processed_position);
+    if (processed_position == start_position && state_loaded) {
+      const auto restored = sr::load_continuation(*state_in);
+      last_committed_logits = restored.last_logits;
+    }
+    if (state_out) {
+      if (state_out->has_parent_path()) std::filesystem::create_directories(state_out->parent_path());
+      auto snapshot = snapshot_ling_state(state_binding, processed_position,
+          committed_prefix, last_committed_logits, kda, mla);
+      sr::save_continuation(*state_out, snapshot);
+    }
+    if (continuation_mode) {
+      std::ofstream sidecar(output/"continuation.json");
+      sidecar << "{\"start_position\":" << start_position
+              << ",\"processed_position\":" << processed_position
+              << ",\"processed_tokens\":" << (processed_position-start_position)
+              << ",\"paused\":" << (paused ? "true" : "false")
+              << ",\"loaded\":" << (state_loaded ? "true" : "false")
+              << ",\"saved\":" << (state_out ? "true" : "false") << "}\n";
+      sidecar.flush();
+      if (!sidecar) throw std::runtime_error("continuation sidecar write failed");
+    }
+    auto stats=cache.stats(); routes.flush();
     if(route_probe) {
       if(!probe_captured) throw std::runtime_error("route probe position was not evaluated");
       write_route_probe(output/"route-probe.json",*route_probe,probe_input_hidden,
@@ -620,14 +774,14 @@ int main(int argc,char **argv) {
                         probe_router_logits,probe_sigmoid,probe_bias,probe_corrected,
                         probe_ids,probe_weights);
     }
-    if(generate) {
+    if(generate && !paused) {
       std::ofstream generated(output/"generation.json");
       generated << generation.receipt("strata-ling-generation-v1"); generated.flush();
       if(!generated) throw std::runtime_error("generation receipt write failed");
     }
     if(!routes) throw std::runtime_error("route trace write failed");
     std::ostringstream token_json;token_json<<'[';
-    for(size_t i=0;i<tokens.size();++i){if(i) token_json<<',';token_json<<tokens[i];}token_json<<']';
+    for(size_t i=0;i<committed_prefix.size();++i){if(i) token_json<<',';token_json<<committed_prefix[i];}token_json<<']';
     size_t host_attention_state_live_logical_bytes = 0;
     size_t host_attention_state_capacity_logical_bytes = 0;
     for (size_t layer = 0; layer < 24; ++layer) {
@@ -642,7 +796,7 @@ int main(int argc,char **argv) {
     }
     std::ostringstream receipt;receipt<<std::setprecision(12)
       <<"{\"status\":\"executed\",\"model\":\"Ling-3.0-tiny\",\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
-      <<tokens.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<tokens.size()
+      <<committed_prefix.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<(processed_position-start_position)
       <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"rope_frequency\":\""<<rope_frequency_name<<"\",\"rms_mode\":\""<<rms_mode_name<<"\",\"pointwise_mode\":\""<<pointwise_name<<"\",\"cache_budget_bytes\":"<<budget
       <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
       <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""

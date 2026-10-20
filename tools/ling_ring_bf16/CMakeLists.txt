@@ -10,7 +10,7 @@ add_library(ring_reference STATIC
   ${STRATA_ROOT}/src/ring/tensor_store.cpp)
 target_include_directories(ring_reference PUBLIC ${STRATA_ROOT}/include)
 enable_testing()
-foreach(unit attention routing expert_cache tensor_store numerics generation)
+foreach(unit attention routing expert_cache tensor_store numerics generation continuation)
   add_executable(ring_${unit}_test ${STRATA_ROOT}/tests/ring_${unit}_test.cpp)
   target_link_libraries(ring_${unit}_test PRIVATE ring_reference)
   target_compile_options(ring_${unit}_test PRIVATE -UNDEBUG)

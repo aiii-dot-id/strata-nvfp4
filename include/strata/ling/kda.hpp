@@ -52,6 +52,17 @@ public:
   const float *q_conv_data() const noexcept { return q_conv_state_.data(); }
   const float *k_conv_data() const noexcept { return k_conv_state_.data(); }
   const float *v_conv_data() const noexcept { return v_conv_state_.data(); }
+  size_t recurrent_size() const noexcept { return recurrent_.size(); }
+  size_t q_conv_size() const noexcept { return q_conv_state_.size(); }
+  size_t k_conv_size() const noexcept { return k_conv_state_.size(); }
+  size_t v_conv_size() const noexcept { return v_conv_state_.size(); }
+  // Replaces every persistent vector as one transaction. Inputs must have
+  // this state's exact geometry and contain finite values. A failed restore
+  // leaves this state untouched, which permits callers to implement rollback.
+  bool restore(const std::vector<float> &recurrent,
+               const std::vector<float> &q_conv,
+               const std::vector<float> &k_conv,
+               const std::vector<float> &v_conv, std::string &error);
   void clear() noexcept;
 
 private:

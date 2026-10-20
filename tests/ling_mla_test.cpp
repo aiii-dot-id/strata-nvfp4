@@ -138,5 +138,29 @@ int main() {
     (void)rms_norm({1.0f, 2.0f, 3.0f}, {1.0f, 1.0f, 1.0f}, RmsMode::TorchCudaOrder);
     assert(false);
   } catch (const std::exception &) {}
+  // Continuations serialize only committed slots and restore them atomically.
+  MlaCache saved_cache(c, 3);
+  (void)saved_cache.step(q,kn,kr,v,g,0);
+  auto saved_keys = saved_cache.live_keys();
+  const auto saved_values = saved_cache.live_values();
+  MlaCache restored_cache(c, 3);
+  std::string restore_error;
+  assert(restored_cache.restore_live(1, saved_keys, saved_values, restore_error));
+  assert(restored_cache.length() == 1 && restored_cache.live_keys() == saved_keys &&
+         restored_cache.live_values() == saved_values);
+  const auto stable_keys = restored_cache.keys();
+  const auto stable_values = restored_cache.values();
+  auto bad_keys = saved_keys; bad_keys[0] = std::numeric_limits<float>::quiet_NaN();
+  assert(!restored_cache.restore_live(1, bad_keys, saved_values, restore_error));
+  assert(restored_cache.length() == 1 && restored_cache.keys() == stable_keys &&
+         restored_cache.values() == stable_values);
+  auto short_values = saved_values; short_values.pop_back();
+  assert(!restored_cache.restore_live(1, saved_keys, short_values, restore_error));
+  assert(restored_cache.length() == 1 && restored_cache.keys() == stable_keys &&
+         restored_cache.values() == stable_values);
+  assert(!restored_cache.restore_live(4, saved_keys, saved_values, restore_error));
+  saved_keys[0] += 1.0f;
+  assert(restored_cache.live_keys()[0] != saved_keys[0]);
+
   std::cout<<"Ling MLA CPU controls passed\n";
 }

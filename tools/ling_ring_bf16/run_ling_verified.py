@@ -198,7 +198,7 @@ def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, 
         *sorted((repo / "include/strata/ling").glob("*.hpp")),
         *sorted((repo / "src/ling").glob("*")),
         *(repo / "include/strata/ring" / name for name in
-          ("expert_cache.hpp", "generation.hpp", "numerics.hpp", "routing.hpp", "tensor_store.hpp")),
+          ("expert_cache.hpp", "generation.hpp", "continuation.hpp", "numerics.hpp", "routing.hpp", "tensor_store.hpp")),
         *(repo / "src/ring" / name for name in
           ("routing.cpp", "expert_cache.cpp", "tensor_store.cpp")),
         repo / "include/strata/kernels/bf16_gemv.hpp",

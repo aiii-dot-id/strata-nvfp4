@@ -207,6 +207,26 @@ int main() {
     same &= near(got[i], want[i]);
   check(same, "prefill matches independent golden");
   check(cache.length() == 3, "prefill commits three positions");
+  const auto saved_keys = cache.live_keys(), saved_values = cache.live_values();
+  strata::ring::KvCache forked(8, 2, 4);
+  check(forked.restore_live(3, saved_keys, saved_values, err),
+        "KV snapshot restores a fork");
+  check(forked.length() == 3 && forked.live_keys() == saved_keys &&
+            forked.live_values() == saved_values,
+        "KV fork has exactly committed payload");
+  auto bad_keys = saved_keys; bad_keys[0] = std::numeric_limits<float>::quiet_NaN();
+  check(!forked.restore_live(3, bad_keys, saved_values, err) &&
+            forked.live_keys() == saved_keys,
+        "nonfinite KV restore is transactional");
+  check(!forked.restore_live(2, saved_keys, saved_values, err) &&
+            forked.live_keys() == saved_keys,
+        "wrong KV restore shape is transactional");
+  check(!forked.restore_live(9, saved_keys, saved_values, err) &&
+            forked.length() == 3 && forked.live_values() == saved_values,
+        "out-of-capacity KV restore is transactional");
+  strata::ring::KvCache empty(8, 2, 4);
+  check(empty.restore_live(0, {}, {}, err) && empty.length() == 0,
+        "empty KV snapshot restores");
 
   strata::ring::KvCache normalized_cache(8, 2, 4);
   std::vector<float> normalized(q.size());

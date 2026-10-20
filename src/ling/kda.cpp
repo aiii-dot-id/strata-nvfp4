@@ -162,6 +162,36 @@ void KdaState::clear() noexcept {
   std::fill(v_conv_state_.begin(), v_conv_state_.end(), 0.0f);
 }
 
+bool KdaState::restore(const std::vector<float> &recurrent,
+                       const std::vector<float> &q_conv,
+                       const std::vector<float> &k_conv,
+                       const std::vector<float> &v_conv,
+                       std::string &error) {
+  error.clear();
+  if (recurrent.size() != recurrent_.size() ||
+      q_conv.size() != q_conv_state_.size() ||
+      k_conv.size() != k_conv_state_.size() ||
+      v_conv.size() != v_conv_state_.size()) {
+    error = "KDA continuation state geometry mismatch";
+    return false;
+  }
+  if (!finite_vector(recurrent) || !finite_vector(q_conv) ||
+      !finite_vector(k_conv) || !finite_vector(v_conv)) {
+    error = "KDA continuation state must be finite";
+    return false;
+  }
+  // Copy first: allocation failure cannot leave a partially restored state.
+  std::vector<float> next_recurrent(recurrent);
+  std::vector<float> next_q(q_conv);
+  std::vector<float> next_k(k_conv);
+  std::vector<float> next_v(v_conv);
+  recurrent_.swap(next_recurrent);
+  q_conv_state_.swap(next_q);
+  k_conv_state_.swap(next_k);
+  v_conv_state_.swap(next_v);
+  return true;
+}
+
 bool kda_forward(const KdaConfig &c, const float *q, const float *k,
                  const float *v, const float *gate, const float *beta,
                  int64_t n_tokens, const KdaWeights &weights, KdaState &state,

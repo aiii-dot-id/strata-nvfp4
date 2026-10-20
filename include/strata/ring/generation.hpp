@@ -95,6 +95,35 @@ public:
       evaluated_.push_back(token);
     return token;
   }
+  // Resume before sampling the token following the last committed position.
+  // Cache restore is the caller's responsibility and must commit atomically.
+  void resume_prefix(const std::vector<int>& prefix,
+                     const std::vector<float>& last_logits) {
+    if (prefix.size() > kv_capacity())
+      throw std::invalid_argument("resumed prefix exceeds generation capacity");
+    for(int id:prefix) if(id<0 || id>=vocab_)
+      throw std::invalid_argument("invalid resumed prefix token");
+    const size_t common=std::min(prefix.size(),prompt_.size());
+    if(!std::equal(prefix.begin(),prefix.begin()+common,prompt_.begin()))
+      throw std::invalid_argument("resumed prompt prefix mismatch");
+    GreedyGeneration staged(*this);
+    if(prefix.size()>=prompt_.size()) {
+      if(!limit_) {
+        if(prefix.size()!=prompt_.size())
+          throw std::invalid_argument("teacher-forced prefix exceeds prompt");
+      } else {
+        staged.generated_.assign(prefix.begin()+prompt_.size(),prefix.end());
+        if(staged.generated_.size()>=limit_)
+          throw std::invalid_argument("resumed generation exceeds budget");
+        for(int id:staged.generated_)
+          if(std::find(eos_.begin(),eos_.end(),id)!=eos_.end())
+            throw std::invalid_argument("resumed prefix contains committed EOS");
+        staged.evaluated_=prefix;staged.reason_.clear();
+        staged.sample(prefix.size()-1,last_logits);
+      }
+    }
+    *this=std::move(staged);
+  }
   std::string receipt(const std::string &schema = "strata-ring-generation-v1") const {
     if (!limit_ || reason_.empty())
       throw std::logic_error("generation not complete");
