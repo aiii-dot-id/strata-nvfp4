@@ -1157,7 +1157,7 @@
     "pilot_implementation_commit": "93eee22f118fe0085869f257dbbff2a56fe70a5a"
   },
   "schema": "strata-current-numeric-qualification-v2",
-  "scope": "BF16 checkpoints with FP32 working arithmetic: bounded Release parity and completed fresh pilot only",
+  "scope": "BF16 checkpoints with FP32 working arithmetic: bounded Release parity; completed historical ten-case quality pilot; newly prepared six-case paired Ling pilot has not run",
   "status": "bounded_numeric_qualification",
   "tests": {
     "current_cuda_build_compatibility": {
