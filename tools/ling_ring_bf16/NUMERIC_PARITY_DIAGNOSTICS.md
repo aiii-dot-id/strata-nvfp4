@@ -343,11 +343,57 @@ kernel. MLA cache and attention remain native. Enable `LING_ENABLE_CUDA` and
 Neither profile changes the defaults. The new executables reproduced every
 retained layer, final-hidden, logit and route byte on four-position default
 controls for both models. The full Python suite passed 189 tests. CPU CTests
-passed 7/7 for the Torch Ring build, 3/3 for Torch Ling, and the native-only
-Ring/Ling builds passed 6/6 and 2/2 respectively.
+passed 7/7 for the Torch Ring build and 3/3 for Torch Ling. The native-only
+6/6 and 2/2 counts originally attributed here came from an older source receipt
+and did not qualify that commit. This attribution is corrected by fresh
+no-Torch builds in the 2026-10-20 update below.
 
 Evidence is under `/work/AI/experiments/strata-parity-repair-20261019-r1/`.
 `CURRENT_NUMERIC_QUALIFICATION.json` records exact comparison-result hashes.
 These first artifacts have an unspecified CMake build type. Optimized Release
 artifacts must pass the same gates before they enter the separate fresh quality
 and efficiency run. Cross-date run times are not a controlled speedup estimate.
+
+
+## Opt-in residency and verification update, 2026-10-20 UTC
+
+Implementation commits add original-BF16 output-head residency, repair a real
+Ring no-Torch compilation guard, and add bounded parallel full-file SHA-256.
+CUDA arithmetic, comparison thresholds, default profile selections and model
+checkpoint bytes are unchanged. Head mode stays off and hash workers stay 1
+unless explicitly selected.
+
+Head-enabled Ring 1,031 and Ling 195/358 retained traces matched every native
+payload and route byte; their original-source comparisons passed unchanged
+thresholds. These repeat 32,308 routed positions, not new independent quality
+examples. Both real insufficient-memory controls refused before output.
+The final Ring executable was replayed after the no-Torch guard repair.
+Fresh builds passed Ring Torch 7/7, native-only 6/6, Ling Torch 3/3 and native-only
+2/2 CPU CTests. The previous no-Torch receipt referred to older source, as
+noted above; it is retained as historical evidence rather than reused as proof.
+
+The hashing helper performs the same complete serial/parallel per-file digest
+in deterministic caller order. Every checkpoint shard is still hashed before
+and after each run. Source-closure review caught a missing helper pin before
+integration; it was repaired. All 201 CPU tests pass, including missing/read/
+hash failures, helper mutation, strict worker bounds and actual CLI forwarding.
+Real four-worker Ring/Ling checkpoint digests match the retained full-checkpoint
+receipts; four-position native payloads/routes are bitwise exact. Thread caps
+are recorded per job, with no machine-global configuration change.
+
+Efficiency and quality remain separate. The two-case direct Ling smoke has
+identical tokens with residency off/on and 1.151x native / 1.097x whole-case
+observed throughput; both answers are wrong in both modes, so verified work
+per hour is zero. Shared-host Ring timing became uninterpretable when load
+exceeded 100 and I/O pressure exceeded 60 percent. The partial experiment is
+interrupted, not passed. A 512-token Ring completion smoke was also stopped
+for feasibility; length termination cannot earn correctness.
+
+Ling's own documentation defaults to thinking on. A consumed arithmetic
+calibration changed direct-mode 81 to correct 79 when thinking was enabled;
+both arms reached EOS. This is one diagnostic case, not fresh improvement or
+production admission. The anonymous six-case paired pilot is independently
+oracled and prepared separately. No research weights or serving changes were
+promoted. All execution was on dev8; Sev's Mac runtime was untouched.
+
+Current artifact paths and SHA-256 pins are in CURRENT_NUMERIC_QUALIFICATION.json.

@@ -986,7 +986,7 @@
     "Prefill/decode phase timings are unavailable in this final review; native wall is instrumented execution and excludes wrapper verification; whole model-window rates include failed work and verification."
   ],
   "mac_runtime_actions": [],
-  "next_discriminator": "Profile copies/cache and qualify the prepared BF16 output-matrix residency candidate; qualify workload-specific reasoning plus verification on new tasks before promotion.",
+  "next_discriminator": "Run the independently authored six-case fresh paired Ling thinking-mode pilot; retain no promotion without independent broader validation. Measure cache capacity and verification concurrency only with an interpretable shared-host state.",
   "parity": {
     "admission": {
       "passed": true,
@@ -1160,20 +1160,159 @@
   "scope": "BF16 checkpoints with FP32 working arithmetic: bounded Release parity and completed fresh pilot only",
   "status": "bounded_numeric_qualification",
   "tests": {
-    "ling_ctest_passed": 3,
-    "no_torch_build_and_cpu_rejection": {
+    "current_cuda_build_compatibility": {
+      "path": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/COMPAT-BUILD.json",
+      "sha256": "51ab883043c1061a2201d43fb80669a7419c5a92232db33e49479cc6ed162064"
+    },
+    "historical_no_torch_receipt_not_current_qualification": {
       "path": "/work/AI/experiments/ring-native-rms-guard-build/NO_TORCH_BUILD_RECEIPT.json",
       "sha256": "07e080a827c2e6f2742f176ba9597e52ae68c4152a1439a3630d2cc24f438004",
       "size": 3557
     },
+    "ling_ctest_passed": 3,
     "python_log": {
-      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/CPU-TESTS.log",
-      "sha256": "c0c45b6db4e1efe116b5322f7b239ed6ea9a94ab37c53adbb4541d46138614c4",
-      "size": 1565
+      "path": "/work/AI/experiments/strata-parallel-hash-integration-20261020-r1/CPU-TESTS-r3.log",
+      "sha256": "b1cf1b0633d9785a8ac87ad82ab3ba8015930aa0cecb9660e5c6de8b608d87ae"
     },
-    "python_passed": 189,
+    "python_passed": 201,
+    "python_source_bytes": {
+      "path": "/work/AI/experiments/strata-parallel-hash-integration-20261020-r1/CPU-TESTS-r3.json",
+      "sha256": "49d897d22e81acab64144cda95de3dc89695c47ac109186d0170caf1e795bd1e"
+    },
     "ring_ctest_passed": 7
   },
-  "tests_scope": "Recorded tests on implementation commit 93eee22f; subsequent changes here are qualification documentation only.",
-  "total_exact_routed_positions": 72009
+  "tests_scope": "Python source bytes committed at24109124:201 CPU tests. C++ Torch/no-Torch build and CTests atddace are unchanged by the Python-only hash feature; new build receipt replaces misattributed historical no-Torch receipt.",
+  "total_exact_routed_positions": 72009,
+  "updates_20261020": {
+    "checkpoint_weights_modified": false,
+    "cuda_cpp_commit": "ddacebeb4d12e23aa70f8a1ee6ee8aef378e1224",
+    "defaults": {
+      "hash_workers": 1,
+      "lm_head_residency": "off"
+    },
+    "fresh_quality": {
+      "oracle_admission": {
+        "path": "/work/AI/experiments/strata-ling-fresh-modes-20261020-r1/ORACLE-ADMISSION.json",
+        "sha256": "f2e0836ad4fee58a90f55a75e7e11eba73832083f675bedeb14a3678589597c9"
+      },
+      "public_cases": {
+        "path": "/work/AI/experiments/strata-ling-fresh-modes-20261020-r1/cases-r1.json",
+        "sha256": "64504ef9a38aaff74ce94a35ebd6b983c84228f4dc2f187aaadeab6b0d929801"
+      },
+      "status": "prepared_not_executed"
+    },
+    "head_residency": {
+      "actual_memory_refusals_passed": true,
+      "bf16_bytes": {
+        "ling": 482869248,
+        "ring": 643825664
+      },
+      "default_preserved_bitwise": true,
+      "final_ring_executable_replay": {
+        "path": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/ring-postguard-1031/RESULT.json",
+        "sha256": "c4b84f5e7c0179324aaeab807faefebc4cd5468e34814f522df0aca5d41a504e"
+      },
+      "mode": "cuda",
+      "ordered_route_rows": 32308,
+      "qualified_retained_positions": {
+        "ling": [
+          195,
+          358
+        ],
+        "ring": 1031
+      },
+      "replayed_data_not_independent_cases": true,
+      "result": {
+        "path": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/GPU-RESULT.json",
+        "sha256": "cb00b0784800fbe0e4fa776867900d791b26f0e3d5fbb895ebb9796c09b9d4d1"
+      }
+    },
+    "host_thread_profile": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OMP_WAIT_POLICY": "PASSIVE",
+      "OPENBLAS_NUM_THREADS": "1",
+      "scope": "Explicit per-job environment in successful four-position wrapper readmission; no global environment change or isolated causal speedup claim"
+    },
+    "implementation_commit": "2410912468ba152cc072b19129b9fd58ca66eb32",
+    "ling_mode_calibration": {
+      "both_valid_eos": true,
+      "off_answer": "81",
+      "off_correct": false,
+      "on_answer": "79",
+      "on_correct": true,
+      "result": {
+        "path": "/work/AI/experiments/strata-ling-thinking-discriminator-preparation-20261020-r1/RUN-r1/RESULT.json",
+        "sha256": "276721d39b2a75b06ec88388a4dbd00b1009b271fdd699f12f3a88113de0f7a1"
+      },
+      "scope": "Consumed crate79 only, not fresh validation"
+    },
+    "ling_smoke": {
+      "all_output_ids_identical_between_modes": true,
+      "metrics": {
+        "cuda": {
+          "correct_per_wall_hour": 0,
+          "full_verified_wall_seconds": 201.35366209002677,
+          "native_execution_wall_seconds": 104.136654726,
+          "whole_case_wall_seconds": 212.8800723128952
+        },
+        "off": {
+          "correct_per_wall_hour": 0,
+          "full_verified_wall_seconds": 222.10910227999557,
+          "native_execution_wall_seconds": 119.910346597,
+          "whole_case_wall_seconds": 233.6317343650153
+        }
+      },
+      "model": "Ling-3.0-tiny",
+      "runs": 8,
+      "schema": "strata-lmhead-smoke-analysis-v1",
+      "scope": "Two-case ABBA smoke, not capability or serving admission",
+      "semantic_passes": 0,
+      "service_unchanged": true,
+      "source_result_sha256": "12103c5dd2187560434eab4d844511e12ab21ee32a2d85e718c9c6cc37e79c22",
+      "thinking": "off",
+      "time_ratios_off_over_cuda": {
+        "full_verified_wall_seconds": 1.1030795267120042,
+        "native_execution_wall_seconds": 1.1514710829966939,
+        "whole_case_wall_seconds": 1.0974805289506802
+      },
+      "unique_cases": 2
+    },
+    "mac_runtime_actions": [],
+    "parallel_hash": {
+      "full_before_and_after_hashing": true,
+      "functional_readmission": {
+        "path": "/work/AI/experiments/strata-hash-wrapper-readmission-20261020-r1/functional-r1/RESULT.json",
+        "sha256": "5c5c2c92479da202cbb022643b251af9736c3ea3800890bc3af624c5280fceca"
+      },
+      "no_isolated_speed_claim": true,
+      "readmission_route_rows": {
+        "ling": 92,
+        "ring": 76
+      },
+      "reduced_integrity": false,
+      "workers": "1..4"
+    },
+    "promotion": false,
+    "quantized": false,
+    "reference_precision": "Original checkpoint BF16 storage is widened to FP32 in the cached original-source reference; this is not native-original-BF16 runtime parity.",
+    "ring_completion_smoke": {
+      "note": "512-token native-thinking allowance exhausted in completed cache arm; baseline returned2 without a verified receipt. Original controller did not retain stderr, so the exact baseline exception is unconfirmed.",
+      "result": {
+        "path": "/work/AI/experiments/strata-lmhead-efficiency-20261020-r1/CAMPAIGN-STOP.json",
+        "sha256": "1e61c8bcc3105727d36c81853c0f837b64e41394d9cf565e872f3f2e7686dd60"
+      },
+      "status": "stopped_for_feasibility"
+    },
+    "ring_timing": {
+      "interrupted_for_shared_host_contention": {
+        "path": "/work/AI/experiments/strata-head-prefix-benchmark-20261020-r1/STOP.json",
+        "sha256": "18eb596ec41eb4ad691bb694dcf71618b8921dd48aa449029c223f34244ea85b"
+      },
+      "status": "inconclusive"
+    },
+    "scope": "Opt-in BF16 output matrix residency and full checkpoint hash verification; bounded development tooling only",
+    "service_actions": [],
+    "timestamp_utc": "2026-10-20T03:02:22.886057+00:00"
+  }
 }

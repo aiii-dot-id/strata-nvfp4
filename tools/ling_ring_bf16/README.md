@@ -29,15 +29,37 @@ recorded in [NUMERIC_PARITY_DIAGNOSTICS.md](NUMERIC_PARITY_DIAGNOSTICS.md),
 with exact receipt pins in
 [CURRENT_NUMERIC_QUALIFICATION.json](CURRENT_NUMERIC_QUALIFICATION.json).
 
-Ring's corrected original-frequency option passes the 519-position case;
-at 1,031 positions the optional CUDA router also matches all 19,589 ordered
-routes, but numerical gates still fail. Ling's combined FP32-cuBLAS and
-CUDA-order RMS profile repairs the original 358-position thinking trace and
-passes six of seven generation controls; a fresh 195-position trace fails
-29 routing rows. All top-token choices matching does not waive these failures.
-Historical batched/chunk-reference failures remain separate from the cached
-tokenwise protocol. These are bounded parity and functional controls, with no
-throughput, broad answer-quality, training, or production-readiness claim.
+The composed Release profiles now pass the retained Ring 1,031-position and
+Ling 195/358-position comparisons, plus the sampled fresh traces recorded in
+CURRENT_NUMERIC_QUALIFICATION.json. Earlier failures below are historical.
+The cached original-source reference widens stored BF16 weights to FP32; this
+is not parity to the vendor's native BF16 runtime. The completed ten-case
+quality pilot remains negative: Ring 5/10 and Ling direct mode 1/10. Neither
+model is admitted for production serving on this evidence.
+
+Opt-in output-head residency (`--lm-head-residency cuda`) preserves original
+BF16 bytes and the existing arithmetic, using an additional 614 MiB on Ring or
+460.5 MiB on Ling. Defaults remain off. Retained head-enabled traces and actual
+low-memory refusals passed. `--hash-workers 1..4` provides bounded parallel
+whole-file checkpoint hashing; default 1 preserves serial verification. Both
+full before/after passes remain mandatory, including the hashing helper's own
+source binding. Four-worker full-checkpoint verification and four-position
+native replay passed for both models; no model conversion is involved.
+
+Successful wrapper readmission used per-job `OMP_NUM_THREADS=1`,
+`MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `OMP_WAIT_POLICY=PASSIVE`.
+These are explicit experiment settings, not a global runtime change. The
+preceding unconstrained Ring run timed out; that alone does not establish a
+causal threading diagnosis. Source, environment, failed attempts and exact
+receipts are recorded in the current qualification document.
+
+The two-case Ling direct-mode ABBA smoke preserved identical output IDs:
+1.15x native and 1.10x whole-case observed throughput, but zero correct answers
+in either mode. It therefore demonstrates no verified-work gain. Ring timing
+was interrupted after a shared-host load/I/O spike and remains inconclusive.
+On one consumed arithmetic case, enabling documented default thinking changed
+an incorrect 81 to the correct 79 with valid EOS receipts. Fresh paired
+validation is a separate gate, not supplied by this example.
 
 Author attribution: AI Identity Incorported <james@aiii.id>
 
