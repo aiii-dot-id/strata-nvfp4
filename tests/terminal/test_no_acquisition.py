@@ -42,6 +42,7 @@ INSTALL_WORDS = {"pip", "pip3", "git", "cmake", "ninja", "npm", "npx", "pnpm", "
 
 #: (file, call) -> why a network call there is not an acquisition. Request-time and loopback only.
 NETWORK_ALLOWED = {
+    ("serve/app_ui.py", "urlopen"): "the fixed loopback 127.0.0.1:{port}/api/health readiness probe; no install or download",
     ("serve/server.py", "urlopen"): "an image_url a client sends in a chat request is fetched at request time",
     ("serve/mcp.py", "urlopen"): "the MCP servers the user configured, at request time",
     ("strata_control/tune_api.py", "urlopen"): "the loopback engine/server of a tuning job the user started",

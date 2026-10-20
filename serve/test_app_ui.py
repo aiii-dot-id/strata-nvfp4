@@ -90,6 +90,47 @@ class AppUiTest(unittest.TestCase):
             self.assertEqual(kw["env"]["STRATA_ATTACH_URL"], "http://127.0.0.1:8080/v1")
             self.assertEqual(contained, [proc])
 
+    def test_start_health_probe_is_fixed_loopback_and_mocked(self):
+        requests, contained, opened = [], [], []
+
+        class Proc:
+            def poll(self):
+                return None
+
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+
+        class SynchronousThread:
+            def __init__(self, target):
+                self.target = target
+            def start(self):
+                self.target()
+
+        def popen(*unused, **unused_kw):
+            return Proc()
+
+        def urlopen(url, timeout):
+            requests.append((url, timeout))
+            return Response()
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(app_ui, "find", return_value=((Path("node"), Path("host")), None)), \
+                mock.patch.object(app_ui, "port_busy", return_value=False), \
+                mock.patch.object(app_ui, "data_home", return_value=Path(d)), \
+                mock.patch.object(app_ui.urllib.request, "urlopen", side_effect=urlopen), \
+                mock.patch.object(app_ui.threading, "Thread", side_effect=lambda target, **kw: SynchronousThread(target)):
+            proc = app_ui.start(FakeSvc(), "0.0.0.0", 8080,
+                                environ={"STRATA_APP_UI": "1", "STRATA_APP_UI_OPEN": "0", "STRATA_APP_UI_PORT": "9123"},
+                                popen=popen, contain=contained.append, open_browser=opened.append)
+        self.assertIsNotNone(proc)
+        self.assertEqual(contained, [proc])
+        self.assertEqual(requests, [("http://127.0.0.1:9123/api/health", 2)])
+        self.assertEqual(opened, [])
+
     def test_busy_port_is_not_taken(self):
         s = socket.socket()
         s.bind(("127.0.0.1", 0))
