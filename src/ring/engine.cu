@@ -633,7 +633,11 @@ int main(int argc, char **argv) {
                                    value_order, capture_operator ? &attention_trace : nullptr,
                                    attention_scale == "divide" ? sr::AttentionScoreScale::DivideBySqrt : sr::AttentionScoreScale::ReciprocalSqrt,
                                    rms_backend == RmsBackend::TorchCuda,
+#ifdef STRATA_TORCH_ROUTER
                                    attention_backend == AttentionBackend::TorchCuda ? torch_attention.get() : nullptr))
+#else
+                                   nullptr))
+#endif
           throw std::runtime_error(error);
         auto projected = mv.apply(store.tensor(pre + "attention.dense.weight"), context);
         if (capture_operator) {
