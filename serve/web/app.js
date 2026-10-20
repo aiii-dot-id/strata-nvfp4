@@ -196,8 +196,26 @@ function render(m) {
   if (tab === "monitor") renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept);
   if (tab === "monitor") renderConvCache(m.conversation_cache);
   if (tab === "monitor") renderGpus(m.gpus);
-  if (tab === "about") renderAbout(eng, hw, st, m.gpus);
+  if (tab === "about") renderAbout(eng, hw, st, m.gpus, m.update);
+  renderUpdate(m.update);
 }
+
+// this fork: a newer strata-nvfp4 release (the server asks GitHub at most once a day and never downloads anything):
+// a quiet link in the header, hidden for that release by its x
+function renderUpdate(u) {
+  const show = !!(u && u.tag && /^https:\/\/github\.com\//.test(u.url || "")) && store.get("update-hidden", "") !== u.tag;
+  $("update-note").hidden = !show;
+  if (!show || $("update-link").dataset.tag === u.tag) return;
+  $("update-link").dataset.tag = u.tag;
+  $("update-link").href = u.url;
+  $("update-link").textContent = `${u.tag} is out`;
+  $("update-link").title = `A newer strata-nvfp4 release is published (this is ${u.installed}): ${u.command}. ` +
+                           "Nothing is downloaded by itself. The release notes open in a new tab.";
+}
+$("update-hide").onclick = () => {
+  store.set("update-hidden", $("update-link").dataset.tag || "");
+  $("update-note").hidden = true;
+};
 
 // #596: the conversation cache - the prompt's state the engine keeps between requests (always), and the whole
 // conversations it parks in RAM when "--conversation-cache-mib N" is in the run config's args (opt-in)
@@ -489,11 +507,12 @@ function projectionText(c) {
          `${single ? ` (layer ${single.replace("single", "")}'s direction)` : ""}: a refusal-direction projection, so ` +
          "censorship is off while it is on. Per chat in Sampling (Disable censorship); the API field is \"uncensored\"";
 }
-function renderAbout(eng, hw, st, gv) {
+function renderAbout(eng, hw, st, gv, upd) {
   const kv = {int8: "8-bit", q4_0: "4-bit (Hadamard-rotated)", fp16: "16-bit"}[eng.kv] || eng.kv;
   facts($("facts-engine"), [
     ["Model", eng.model],
     ["Engine", eng.version ? `v${eng.version}` : "built from source"],
+    ["Update", upd && upd.tag ? `${upd.tag} is published (this is ${upd.installed}): ${upd.command}` : null],
     ["Context", eng.max_context ? `${fmt(eng.max_context)} tokens` : null],
     ["KV cache", kv ? `${kv}${eng.kv_resident ? `, streamed: ${fmt(eng.kv_resident)} positions per layer in VRAM, the rest in RAM` : ", all in VRAM"}` : null],
     ["Experts in VRAM", eng.expert_slots ? `${fmt(eng.expert_slots)} (${gb((eng.expert_cache_mib || 0) * 1048576)} GB)` : null],
@@ -692,10 +711,20 @@ function markdown(text) {
 }
 
 // ------------------------------------------------------------------ Chat
+// The sampling shown until the user changes it is the model card's thinking set. Untouched, the page sends NO sampling
+// fields: the server picks the card's set for the request's thinking state (thinking 1.0 / 0.95 / 20, not thinking
+// 0.7 / 0.8 / 20 with a presence penalty). Before 0.1.45 the page sent 0.6 itself; a stored 0.6 with the other two
+// values untouched counts as "not set" too.
 // esp: the censorship switch - undefined follows the server's default (the config's "uncensored"), true/false is
 // the user's own pick.  espv 2: a pick saved by this version (an older one saved esp: true by itself)
-const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", show: true, esp: undefined, mcp: true};
+const DEFAULTS = {thinking: "high", temperature: 1.0, top_p: 0.95, top_k: 20, max: "", seed: "", show: true, esp: undefined, mcp: true};
+const OLD_DEFAULT_TEMPERATURE = 0.6;
+function samplingUntouched(s) {
+  const t = +s.temperature;
+  return (t === DEFAULTS.temperature || t === OLD_DEFAULT_TEMPERATURE) && +s.top_p === DEFAULTS.top_p && +s.top_k === DEFAULTS.top_k;
+}
 let settings = (() => { const s = store.get("sampling", {}); if (s.espv !== 2) delete s.esp; return {...DEFAULTS, ...s}; })();
+if (samplingUntouched(settings)) settings.temperature = DEFAULTS.temperature;
 let messages = store.get("chat", []);
 let attachments = [];                 // {name, url}
 let busy = null;                      // {controller, msg}
@@ -924,10 +953,10 @@ async function send() {
 
   const body = {model: health.model, messages: apiMessages(), stream: true,
                 reasoning_effort: settings.thinking};
-  if (settings.temperature > 0) {
-    Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
-  } else {
+  if (!(settings.temperature > 0)) {
     body.temperature = 0;
+  } else if (!samplingUntouched(settings)) {
+    Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
   }
   if (settings.seed) body.seed = +settings.seed;
   if (settings.max) body.max_tokens = +settings.max;
@@ -1145,8 +1174,9 @@ async function loadShared() {
   $("s-share").setAttribute("aria-checked", String(sharedOn));
 }
 function sharedDefaults(s) {
-  const d = {reasoning_effort: s.thinking, temperature: +s.temperature};
-  if (+s.temperature > 0) Object.assign(d, {top_p: +s.top_p, top_k: +s.top_k});
+  const d = {reasoning_effort: s.thinking};
+  if (!(+s.temperature > 0)) d.temperature = 0;
+  else if (!samplingUntouched(s)) Object.assign(d, {temperature: +s.temperature, top_p: +s.top_p, top_k: +s.top_k});
   if (s.seed) d.seed = +s.seed;
   if (s.max) d.max_tokens = +s.max;
   if (projectionLoaded() && s.esp != null) d.experimental_speed_projection = s.esp !== false;
