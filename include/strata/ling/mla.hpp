@@ -18,6 +18,10 @@ public:
   MlaCache(MlaConfig config, size_t capacity);
   size_t length() const { return length_; }
   size_t capacity() const { return capacity_; }
+  // Logical payload only. Vectors reserve these slots at construction; live
+  // bytes count just the positions committed by step().
+  size_t live_payload_bytes() const noexcept;
+  size_t capacity_payload_bytes() const noexcept;
   static float inverse_frequency(const MlaConfig &config, size_t index);
   const std::vector<float> &keys() const { return keys_; }
   const std::vector<float> &values() const { return values_; }

@@ -71,6 +71,13 @@ MlaCache::MlaCache(MlaConfig c, size_t capacity)
   keys_.resize(product(product(capacity,c.heads),c.nope+c.rope));
   values_.resize(product(product(capacity,c.heads),c.value));
 }
+size_t MlaCache::live_payload_bytes() const noexcept {
+  const size_t per_position = config_.heads * (config_.nope + config_.rope + config_.value);
+  return length_ * per_position * sizeof(float);
+}
+size_t MlaCache::capacity_payload_bytes() const noexcept {
+  return (keys_.size() + values_.size()) * sizeof(float);
+}
 std::vector<float> MlaCache::step(const std::vector<float> &query,
                                  const std::vector<float> &key_nope,
                                  const std::vector<float> &key_rope,

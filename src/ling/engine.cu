@@ -628,13 +628,29 @@ int main(int argc,char **argv) {
     if(!routes) throw std::runtime_error("route trace write failed");
     std::ostringstream token_json;token_json<<'[';
     for(size_t i=0;i<tokens.size();++i){if(i) token_json<<',';token_json<<tokens[i];}token_json<<']';
+    size_t host_attention_state_live_logical_bytes = 0;
+    size_t host_attention_state_capacity_logical_bytes = 0;
+    for (size_t layer = 0; layer < 24; ++layer) {
+      if (mla[layer]) {
+        host_attention_state_live_logical_bytes += mla[layer]->live_payload_bytes();
+        host_attention_state_capacity_logical_bytes += mla[layer]->capacity_payload_bytes();
+      } else {
+        const size_t bytes = kda[layer]->state.logical_payload_bytes();
+        host_attention_state_live_logical_bytes += bytes;
+        host_attention_state_capacity_logical_bytes += bytes;
+      }
+    }
     std::ostringstream receipt;receipt<<std::setprecision(12)
       <<"{\"status\":\"executed\",\"model\":\"Ling-3.0-tiny\",\"activation_dtype\":\"FP32\",\"quantized\":false,\"tokens\":"
       <<tokens.size()<<",\"token_ids\":"<<token_json.str()<<",\"logits_mode\":\"all\",\"logits_tokens\":"<<tokens.size()
       <<",\"checkpoint_id\":\""<<identity<<"\",\"layers\":24,\"rope_frequency\":\""<<rope_frequency_name<<"\",\"rms_mode\":\""<<rms_mode_name<<"\",\"pointwise_mode\":\""<<pointwise_name<<"\",\"cache_budget_bytes\":"<<budget
       <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
       <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""
-      <<",\"host_attention_state_bytes\":"<<(size_t(6)*tokens.size()*16*(192+128)+size_t(18)*(16*128*128+3*2048*4))*sizeof(float)
+      // Historical live-use field: retain its name and value for existing receipts.
+      <<",\"host_attention_state_bytes\":"<<host_attention_state_live_logical_bytes
+      <<",\"host_attention_state_live_logical_bytes\":"<<host_attention_state_live_logical_bytes
+      <<",\"host_attention_state_capacity_logical_bytes\":"<<host_attention_state_capacity_logical_bytes
+      <<",\"host_attention_state_payload_scope\":\"logical float payload: MLA key/value slots plus KDA recurrent and convolution state; excludes vector allocator capacity/overhead and temporary buffers\""
       <<",\"matmul_backend\":\""<<matmul_backend_name(matmul_backend)<<"\",\"lm_head_residency\":\""<<lm_head_residency_name(lm_head_residency)<<"\",\"lm_head_resident_bytes\":"<<mv.resident_lm_head_bytes()<<",\"lm_head_resident_uploads\":"<<mv.resident_lm_head_uploads()<<",\"lm_head_resident_apply_calls\":"<<mv.resident_lm_head_apply_calls()<<",\"matmul_fp32_weight_scratch_bytes\":"<<Matvec::fp32_scratch_bytes(matmul_backend)<<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
       <<",\"workspace_bytes\":"<<Matvec::workspace_bytes(matmul_backend)<<",\"wall_seconds\":"
       <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"}\n";

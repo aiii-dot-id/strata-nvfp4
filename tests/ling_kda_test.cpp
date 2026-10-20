@@ -165,6 +165,10 @@ int main() {
   strata::ling::KdaWeights weights{qw.data(), kw.data(), vw.data(), nullptr,
                                    nullptr, nullptr, a.data(), dt.data()};
   strata::ling::KdaState state(c);
+  // recurrent (HV*K*V) plus q/k/v convolution histories.
+  check(state.logical_payload_bytes() == (4 * 3 * 2 + 2 * 3 * 4 +
+                                          2 * 3 * 4 + 4 * 2 * 4) * sizeof(float),
+        "KDA logical payload reports every persistent state vector");
   std::vector<float> output(size_t(T) * VC);
   std::string error;
   const RefResult expected = reference(c, q.data(), k.data(), v.data(), gate.data(),
@@ -246,8 +250,27 @@ int main() {
   check(overflow_state.recurrent_data()[0] == 0.0f && output[0] == 23.0f,
         "L2 overflow preserves state and output");
 
+  try {
+    strata::ling::KdaConfig invalid = c; invalid.conv_kernel = 0;
+    strata::ling::KdaState bad(invalid); (void)bad; check(false, "invalid KDA state geometry rejected");
+  } catch (const std::invalid_argument &) {
+    check(true, "invalid KDA state geometry rejected");
+  }
+  try {
+    strata::ling::KdaConfig overflow = c;
+    overflow.value_heads = std::numeric_limits<int64_t>::max();
+    overflow.num_heads = 1;
+    strata::ling::KdaState bad(overflow); (void)bad; check(false, "overflowing KDA state geometry rejected");
+  } catch (const std::invalid_argument &) {
+    check(true, "overflowing KDA state geometry rejected");
+  }
+
   strata::ling::KdaConfig real;
   strata::ling::KdaState real_state(real);
+  check(real_state.logical_payload_bytes() == 1146880,
+        "one Ling KDA logical payload is the fixed 1.09375 MiB state");
+  check(18 * real_state.logical_payload_bytes() == 20643840,
+        "18 Ling KDA logical payloads total the fixed 19.6875 MiB state");
   std::vector<float> rq(16 * 128), rv(16 * 128), rg(16 * 128), rb(16),
       rwq(16 * 128 * 4, 0.0f), rwk(16 * 128 * 4, 0.0f), rwv(16 * 128 * 4, 0.0f),
       ra(16), rdt(16 * 128);

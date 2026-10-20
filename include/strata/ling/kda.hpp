@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -44,6 +45,9 @@ public:
   int64_t key_dim() const noexcept { return key_dim_; }
   int64_t value_dim() const noexcept { return value_dim_; }
   int64_t conv_kernel() const noexcept { return conv_kernel_; }
+  // Logical float payload for recurrent and three convolution-state vectors.
+  // The KDA state is allocated at construction and does not vary by position.
+  size_t logical_payload_bytes() const noexcept;
   const float *recurrent_data() const noexcept { return recurrent_.data(); }
   const float *q_conv_data() const noexcept { return q_conv_state_.data(); }
   const float *k_conv_data() const noexcept { return k_conv_state_.data(); }

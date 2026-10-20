@@ -150,6 +150,11 @@ KdaState::KdaState(const KdaConfig &config) {
   v_conv_state_.assign(vvw, 0.0f);
 }
 
+size_t KdaState::logical_payload_bytes() const noexcept {
+  return (recurrent_.size() + q_conv_state_.size() + k_conv_state_.size() +
+          v_conv_state_.size()) * sizeof(float);
+}
+
 void KdaState::clear() noexcept {
   std::fill(recurrent_.begin(), recurrent_.end(), 0.0f);
   std::fill(q_conv_state_.begin(), q_conv_state_.end(), 0.0f);

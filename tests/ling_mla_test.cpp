@@ -17,12 +17,19 @@ int main() {
   assert(generation_capacity.capacity() == bounded.kv_capacity());
   MlaConfig c{2,2,4,2,100.0f};
   MlaCache cache(c,3);
+  // MLA reserves key/value slots for the configured capacity, but only the
+  // committed positions form its live logical payload.
+  assert(cache.live_payload_bytes() == 0);
+  assert(cache.capacity_payload_bytes() == 192);
   std::vector<float> q(12),kn(4),kr(4),v{2,4,6,8},g(2);
   auto first=cache.step(q,kn,kr,v,g,0);
+  assert(cache.live_payload_bytes() == 64);
+  assert(cache.live_payload_bytes() < cache.capacity_payload_bytes());
   assert((first==std::vector<float>{1,2,3,4}));
   auto checkpoint=cache;
   auto second=cache.step(q,kn,kr,{4,8,10,12},g,1);
   assert((second==std::vector<float>{1.5f,3,4,5}));
+  assert(cache.live_payload_bytes() == 128);
   assert(checkpoint.step(q,kn,kr,{4,8,10,12},g,1)==second);
   assert(checkpoint.keys()==cache.keys() && checkpoint.values()==cache.values());
   const auto keys=cache.keys(),values=cache.values();
@@ -31,6 +38,15 @@ int main() {
   assert(cache.length()==2 && cache.keys()==keys && cache.values()==values);
   try { cache.step(q,kn,kr,v,g,1);assert(false); } catch(const std::exception &) {}
   assert(cache.length()==2 && cache.keys()==keys && cache.values()==values);
+  auto third=cache.step(q,kn,kr,v,g,2);
+  (void)third;
+  assert(cache.live_payload_bytes() == cache.capacity_payload_bytes());
+  try { MlaCache invalid(MlaConfig{},0); (void)invalid; assert(false); }
+  catch(const std::invalid_argument &) {}
+  try {
+    MlaConfig overflow{}; overflow.heads=std::numeric_limits<size_t>::max();
+    MlaCache invalid(overflow,2); (void)invalid; assert(false);
+  } catch(const std::invalid_argument &) {}
   // Explicit one-head two-position oracle, evaluated in double precision.
   MlaConfig d{1,1,2,1,100.0f};MlaCache nonzero(d,2);
   nonzero.step({0.2f,0.3f,-0.4f},{0.7f},{0.1f,0.9f},{2.0f},{0.0f},0);
