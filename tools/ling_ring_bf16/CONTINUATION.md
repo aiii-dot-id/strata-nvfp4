@@ -42,4 +42,29 @@ Rollback means choosing the preserved ancestor snapshot as the next `--state-in`
 
 Whole-model acceptance compares uninterrupted execution with concatenated prefix/suffix outputs, including every layer, logits and ordered routes. It separately checks empty state, distinct forks, parent isolation, rollback, rejected bindings/corruption, mid-generation resume and terminal EOS/length behavior. Build/CPU checks alone do not establish this acceptance.
 
-The initial implementation passed CPU integration controls and all four builds. Live qualification and fresh held-out results are recorded separately under `/work/AI/experiments/strata-continuation-qualification-20261020-r1` and `/work/AI/experiments/strata-continuation-heldout-20261020-r1`; consult their final result files rather than treating this preparation note as a GPU pass. No production serving or capability-gain claim follows from state extraction alone.
+## Generation-logit readout
+
+`generation_readout.py` is a CPU-only, post-execution audit helper. It memory-maps a retained `logits.f32` trace, checks its sealed `provenance.json` and `execution.json`, then verifies that each recorded generated token is the deterministic argmax of its corresponding logits row. It does not run a model, regrade an answer, establish semantic quality, or measure serving/decode performance. It rejects resumed suffix traces in this initial form and writes its report outside the input artifact.
+
+Example, after the producing receipt has been retained and its provenance digest recorded:
+
+```sh
+CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+python3 tools/ling_ring_bf16/generation_readout.py /new/evidence/full-generation \
+  --expected-provenance-sha256 <sealed-provenance-sha256> \
+  --output /new/evidence/generation-readout.json
+```
+
+The 2026-10-20 qualified baseline artifacts produced sealed alignment evidence for Ling (146 generated EOS-terminated tokens) and Ring (347 generated EOS-terminated tokens). This is trace alignment evidence only; it makes no capability, semantic-quality, native-original equivalence, throughput, or production-serving claim.
+
+## Qualified scope on 2026-10-20
+
+The full-model structural gate passed 28/28 process cases. The fresh pilot completed 32 logical arms: all 16 uninterrupted/resumed generated-token pairs matched, and an independent audit compared all 400 retained layer/logit/route payload splices bitwise. Ring retains 40 state arrays; Ling retains 84.
+
+Strict answer quality was **0/8 per model in each arm** under the frozen response contract and 512-token allowance. Ring exhausted that allowance on all eight tasks. Ling reached EOS on three tasks with correct values but omitted the required `FINAL:` prefix; five tasks exhausted the allowance. These are strict usability results, not evidence that every computed value was wrong. Continuation did not improve answers and no capability or speedup promotion was made.
+
+One original arm stopped because the observer read an exited process. The narrow observer repair was CPU-tested and qualified during the remaining GPU runs. Its failed attempt remains invalid and preserved; its time and the entire repair pause are charged in the primary efficiency metrics. The retry received only the remaining active allowance, an explicitly recorded interruption exception.
+
+The GPU-tested model implementation is `b0338fc59ef77271fae2e8893259ae31c4713219`. The later CPU readout, observer repair, tests and documentation do not change model arithmetic. See [the qualification index](CONTINUATION_QUALIFICATION.json) for exact evidence hashes. Full reports remain under `/work/AI/experiments/strata-continuation-report-20261020-r1` and `/work/AI/experiments/strata-continuation-final-analysis-20261020-r1`; the original failed campaign remains separate from its recovered result.
+
+All model execution was on dev8. There was no quantization, weight update, service change, or Mac/oMLX/Sev interruption. This gate validates inference state and trace alignment; it does not qualify training, semantic completion, recurrence gains, a persistent server, or the full advertised checkpoint context window.

@@ -1,0 +1,46 @@
+{
+  "arithmetic": "original BF16 checkpoint weights, qualified FP32 reference paths; no vendor-BF16 equivalence claim",
+  "author": "AI Identity Incorported <james@aiii.id>",
+  "created_utc": "2026-10-20T14:35:12.434080+00:00",
+  "evidence": {
+    "/work/AI/experiments/strata-continuation-final-analysis-20261020-r1/ALL-PAYLOAD-AUDIT.json": "f7b05b72ad3f97058f5a8b634d65d2ca0941cae832a7be5799b8e604d05318b3",
+    "/work/AI/experiments/strata-continuation-final-analysis-20261020-r1/FINAL-REVIEW.json": "ff915e095dcecb5dbc79af6a55a69a0eee417b3ac630c470cdb4a68cd073c45a",
+    "/work/AI/experiments/strata-continuation-final-analysis-20261020-r1/RECOVERY-FINAL-REVIEW.json": "ddeaebf53d53ad7eb0baa16b872939d5d0679e07d97ef88601cb536b225e91e1",
+    "/work/AI/experiments/strata-continuation-heldout-recovery-20261020-r1/execution/RESULT.json": "a64a08826e1a162510f7cf49dd7bf0b477b0bf669dad52b4f9764eaf72946775",
+    "/work/AI/experiments/strata-continuation-qualification-20261020-r1/execution/RESULT.json": "bf79c18cd50aca0f7a22070257abe07dcf939f77d70de8894cb6b239dbfb2353"
+  },
+  "fresh_cases_per_model": 8,
+  "fresh_exact_layer_logit_route_payload_splices": 400,
+  "fresh_exact_token_pairs": 16,
+  "fresh_logical_arms": 32,
+  "generation_readout": {
+    "ling": {
+      "generated_argmax_matches": 146,
+      "path": "/work/AI/experiments/strata-generation-readout-preparation-20261020-r1/full-Ling.json",
+      "sha256": "c3aea4785ed88fc46b1791a997b3d66b103c2642cce755a046f6318b4c26be0a"
+    },
+    "ring": {
+      "generated_argmax_matches": 347,
+      "path": "/work/AI/experiments/strata-generation-readout-preparation-20261020-r1/full-Ring.json",
+      "sha256": "42c7ae8a232f67c6f45a7e71877761b0cb31452461d613753d0b3e4a6a75d242"
+    }
+  },
+  "gpu_tested_implementation": "b0338fc59ef77271fae2e8893259ae31c4713219",
+  "production_promoted": false,
+  "quantized": false,
+  "schema": "strata-continuation-qualification-index-v1",
+  "scope": "A synthetic pilot and exactness qualification, not broad capability, performance or production qualification; old failure and repair pause remain charged.",
+  "state_kind": "greedy inference continuation; no optimizer, training, identity or external-tool rollback",
+  "strict_correct": {
+    "ling": {
+      "baseline": 0,
+      "snapshot_resume": 0
+    },
+    "ring": {
+      "baseline": 0,
+      "snapshot_resume": 0
+    }
+  },
+  "weights_changed": false,
+  "whole_model_process_cases": 28
+}

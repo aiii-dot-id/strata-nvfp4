@@ -9,7 +9,7 @@ def _stat(pid: int) -> tuple[int, int, int] | None:
         text=pathlib.Path(f'/proc/{pid}/stat').read_text()
         fields=text[text.rfind(')')+2:].split()
         return int(fields[1]), int(fields[2]), int(fields[19])  # PPID, process group, start ticks
-    except (FileNotFoundError, IndexError, ValueError): return None
+    except (FileNotFoundError, ProcessLookupError, IndexError, ValueError): return None
 
 def _all_stats() -> dict[int, tuple[int,int,int]]:
     out={}
@@ -39,7 +39,7 @@ def _rss_kib(pid: int) -> int | None:
     try:
         for line in pathlib.Path(f'/proc/{pid}/status').read_text().splitlines():
             if line.startswith('VmRSS:'): return int(line.split()[1])
-    except FileNotFoundError: pass
+    except (ProcessLookupError, FileNotFoundError): pass
     return None
 
 def _host() -> dict:
