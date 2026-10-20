@@ -1,5 +1,13 @@
 # Strata Ling/Ring BF16 streaming reference
 
+Current upstream synchronization and rebuilt-executable scope are recorded in
+[UPSTREAM_QUALIFICATION_20261020.md](UPSTREAM_QUALIFICATION_20261020.md).
+The new binaries pass bounded four-position replay; earlier long-context
+results remain bound to their original executables. The fresh paired Ling
+thinking pilot failed its strict quality gate, so neither executor is admitted
+for production serving. The source-linked capability plan and calibrated cache
+analyzer are included; original BF16 weights and default behavior are retained.
+
 This directory is the opt-in reference path for running the Ring-mini-2.0
 architecture from original BF16 checkpoint weights on a host plus a bounded GPU
 working set. The implementation uses Strata's BF16 GEMV kernel for GPU matrix

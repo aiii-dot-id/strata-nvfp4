@@ -1,0 +1,330 @@
+{
+  "analyzer_sha256": "de12329c2566ed30ee602e8748f3b2bc6d873a9c3f2e28e769edfd8d12bca0d6",
+  "cases": [
+    {
+      "accesses": 156712,
+      "belady_lower_bound": {
+        "1GiB": {
+          "entries": 170,
+          "evictions": 73148,
+          "hits": 83394,
+          "misses": 73318,
+          "resident_bytes": 1069547520,
+          "streamed_payload_bytes": 461276971008
+        },
+        "2GiB": {
+          "entries": 341,
+          "evictions": 50620,
+          "hits": 105751,
+          "misses": 50961,
+          "resident_bytes": 2145386496,
+          "streamed_payload_bytes": 320618889216
+        }
+      },
+      "capacities_entries": {
+        "1GiB": 170,
+        "2GiB": 341
+      },
+      "case": "ring-1031",
+      "counterfactual_admissible": true,
+      "counterfactual_status": "admitted_after_exact_1GiB_calibration",
+      "current_budget_bytes": 1073741824,
+      "current_lru": {
+        "entries": 170,
+        "evictions": 110954,
+        "hits": 45588,
+        "misses": 111124,
+        "resident_bytes": 1069547520,
+        "streamed_payload_bytes": 699131756544
+      },
+      "current_lru_calibration": {
+        "actual": {
+          "cache_evictions": 110954,
+          "cache_hits": 45588,
+          "cache_misses": 111124,
+          "cache_resident_bytes": 1069547520
+        },
+        "exact_match": true,
+        "expected": {
+          "cache_evictions": 110954,
+          "cache_hits": 45588,
+          "cache_misses": 111124,
+          "cache_resident_bytes": 1069547520
+        },
+        "payload_bytes": 6291456
+      },
+      "execution_sha256": "ea47dd81e278d215879f1aeabc84a96a05a3dd07e06a35a04d77634cce380623",
+      "interpretation": "streamed_payload_bytes is a model-implied payload volume: cache misses multiplied by fixed BF16 expert bytes. It is not measured transport, I/O, or latency.",
+      "lru": {
+        "1GiB": {
+          "entries": 170,
+          "evictions": 110954,
+          "hits": 45588,
+          "misses": 111124,
+          "resident_bytes": 1069547520,
+          "streamed_payload_bytes": 699131756544
+        },
+        "2GiB": {
+          "entries": 341,
+          "evictions": 91708,
+          "hits": 64663,
+          "misses": 92049,
+          "resident_bytes": 2145386496,
+          "streamed_payload_bytes": 579122233344
+        }
+      },
+      "native_dir": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/ring-1031/native",
+      "payload_bytes": 6291456,
+      "receipt_model": "Ring-mini-2.0",
+      "receipt_tokens": 1031,
+      "route_lines": 19589,
+      "route_sha256": "9e65f1e0b878116a5d9c3bab9c8927480af7505b3b1909f724b7c6bd817fe579",
+      "unique_experts_by_layer": {
+        "1": 185,
+        "10": 192,
+        "11": 183,
+        "12": 189,
+        "13": 184,
+        "14": 183,
+        "15": 170,
+        "16": 161,
+        "17": 154,
+        "18": 139,
+        "19": 155,
+        "2": 191,
+        "3": 173,
+        "4": 179,
+        "5": 166,
+        "6": 178,
+        "7": 203,
+        "8": 189,
+        "9": 201
+      },
+      "unique_experts_total": 3375
+    },
+    {
+      "accesses": 35880,
+      "belady_lower_bound": {
+        "1GiB": {
+          "entries": 227,
+          "evictions": 15283,
+          "hits": 20370,
+          "misses": 15510,
+          "resident_bytes": 1071120384,
+          "streamed_payload_bytes": 73185361920
+        },
+        "2GiB": {
+          "entries": 455,
+          "evictions": 9973,
+          "hits": 25452,
+          "misses": 10428,
+          "resident_bytes": 2146959360,
+          "streamed_payload_bytes": 49205477376
+        }
+      },
+      "capacities_entries": {
+        "1GiB": 227,
+        "2GiB": 455
+      },
+      "case": "ling-195",
+      "counterfactual_admissible": true,
+      "counterfactual_status": "admitted_after_exact_1GiB_calibration",
+      "current_budget_bytes": 1073741824,
+      "current_lru": {
+        "entries": 227,
+        "evictions": 23411,
+        "hits": 12242,
+        "misses": 23638,
+        "resident_bytes": 1071120384,
+        "streamed_payload_bytes": 111538077696
+      },
+      "current_lru_calibration": {
+        "actual": {
+          "cache_evictions": 23411,
+          "cache_hits": 12242,
+          "cache_misses": 23638,
+          "cache_resident_bytes": 1071120384
+        },
+        "exact_match": true,
+        "expected": {
+          "cache_evictions": 23411,
+          "cache_hits": 12242,
+          "cache_misses": 23638,
+          "cache_resident_bytes": 1071120384
+        },
+        "payload_bytes": 4718592
+      },
+      "execution_sha256": "35677a2392eb8672c1e18dfcad64d0eaa10e98f897629433be2714dafb7bf90c",
+      "interpretation": "streamed_payload_bytes is a model-implied payload volume: cache misses multiplied by fixed BF16 expert bytes. It is not measured transport, I/O, or latency.",
+      "lru": {
+        "1GiB": {
+          "entries": 227,
+          "evictions": 23411,
+          "hits": 12242,
+          "misses": 23638,
+          "resident_bytes": 1071120384,
+          "streamed_payload_bytes": 111538077696
+        },
+        "2GiB": {
+          "entries": 455,
+          "evictions": 18155,
+          "hits": 17270,
+          "misses": 18610,
+          "resident_bytes": 2146959360,
+          "streamed_payload_bytes": 87812997120
+        }
+      },
+      "native_dir": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/ling-195/native",
+      "payload_bytes": 4718592,
+      "receipt_model": "Ling-3.0-tiny",
+      "receipt_tokens": 195,
+      "route_lines": 4485,
+      "route_sha256": "0bf1e6c1f1cdf25256c89374a60132040d8836f07825b70bfd5e663fa1f3f26f",
+      "unique_experts_by_layer": {
+        "1": 118,
+        "10": 100,
+        "11": 99,
+        "12": 111,
+        "13": 110,
+        "14": 105,
+        "15": 109,
+        "16": 109,
+        "17": 106,
+        "18": 101,
+        "19": 102,
+        "2": 116,
+        "20": 97,
+        "21": 96,
+        "22": 99,
+        "23": 97,
+        "3": 116,
+        "4": 107,
+        "5": 111,
+        "6": 113,
+        "7": 106,
+        "8": 112,
+        "9": 108
+      },
+      "unique_experts_total": 2448
+    },
+    {
+      "accesses": 65872,
+      "belady_lower_bound": {
+        "1GiB": {
+          "entries": 227,
+          "evictions": 25890,
+          "hits": 39755,
+          "misses": 26117,
+          "resident_bytes": 1071120384,
+          "streamed_payload_bytes": 123235467264
+        },
+        "2GiB": {
+          "entries": 455,
+          "evictions": 15279,
+          "hits": 50138,
+          "misses": 15734,
+          "resident_bytes": 2146959360,
+          "streamed_payload_bytes": 74242326528
+        }
+      },
+      "capacities_entries": {
+        "1GiB": 227,
+        "2GiB": 455
+      },
+      "case": "ling-358",
+      "counterfactual_admissible": true,
+      "counterfactual_status": "admitted_after_exact_1GiB_calibration",
+      "current_budget_bytes": 1073741824,
+      "current_lru": {
+        "entries": 227,
+        "evictions": 40307,
+        "hits": 25338,
+        "misses": 40534,
+        "resident_bytes": 1071120384,
+        "streamed_payload_bytes": 191263408128
+      },
+      "current_lru_calibration": {
+        "actual": {
+          "cache_evictions": 40307,
+          "cache_hits": 25338,
+          "cache_misses": 40534,
+          "cache_resident_bytes": 1071120384
+        },
+        "exact_match": true,
+        "expected": {
+          "cache_evictions": 40307,
+          "cache_hits": 25338,
+          "cache_misses": 40534,
+          "cache_resident_bytes": 1071120384
+        },
+        "payload_bytes": 4718592
+      },
+      "execution_sha256": "c47016aa5dd167b5a1c35fe75458d6c7743b3ae9dcacd9e3a8ed8166e1a2edf8",
+      "interpretation": "streamed_payload_bytes is a model-implied payload volume: cache misses multiplied by fixed BF16 expert bytes. It is not measured transport, I/O, or latency.",
+      "lru": {
+        "1GiB": {
+          "entries": 227,
+          "evictions": 40307,
+          "hits": 25338,
+          "misses": 40534,
+          "resident_bytes": 1071120384,
+          "streamed_payload_bytes": 191263408128
+        },
+        "2GiB": {
+          "entries": 455,
+          "evictions": 29962,
+          "hits": 35455,
+          "misses": 30417,
+          "resident_bytes": 2146959360,
+          "streamed_payload_bytes": 143525412864
+        }
+      },
+      "native_dir": "/work/AI/experiments/strata-lmhead-qualification-20261020-r1/ling-358/native",
+      "payload_bytes": 4718592,
+      "receipt_model": "Ling-3.0-tiny",
+      "receipt_tokens": 358,
+      "route_lines": 8234,
+      "route_sha256": "5e1f4f4575d0562e9ba7cdd1cec3fef0ba457d7ced02621a2971c0d56ef1865b",
+      "unique_experts_by_layer": {
+        "1": 121,
+        "10": 107,
+        "11": 102,
+        "12": 111,
+        "13": 111,
+        "14": 104,
+        "15": 114,
+        "16": 114,
+        "17": 105,
+        "18": 101,
+        "19": 102,
+        "2": 115,
+        "20": 100,
+        "21": 102,
+        "22": 101,
+        "23": 99,
+        "3": 114,
+        "4": 110,
+        "5": 108,
+        "6": 109,
+        "7": 106,
+        "8": 110,
+        "9": 104
+      },
+      "unique_experts_total": 2470
+    }
+  ],
+  "policy": "Global equal-payload LRU in exact routes.tsv order; Belady is an offline clairvoyant lower bound, not an executable policy.",
+  "schema": "strata-expert-trace-analysis-v2",
+  "scope": "Offline simulation only. No model, tensor payload, GPU, or service operation.",
+  "source_pins": {
+    "files_sha256": {
+      "src/ling/engine.cu": "ea6f380d5dcb2f86a3e1f0da276152727940c1258d56e53456cc8c70c99470b0",
+      "src/ring/engine.cu": "188a71117ab4d843925e2479b960188b7a214f2c7639db0a9190663c1f76c8c7",
+      "src/ring/expert_cache.cpp": "6c687739b6410e90d70571efa98a26d412943bb81a1065eb9dd1f55b0a6e5efa",
+      "tools/ling_ring_bf16/CMakeLists.txt": "3c925eb6b704a7edfa6c50c7757e576295c378f41e2a76d90c2c9d0cb96e71eb",
+      "tools/ling_ring_bf16/ling/CMakeLists.txt": "9e330990210abbfb2dc9efd501763d96c25b7d2ba8786f4699eb17e3541d1a97"
+    },
+    "git_head": "22942f42038083cf063c48d8ae13093d94c9e2c7",
+    "source_root": "/work/AI/src/strata-ling-ring-current-20261020"
+  }
+}

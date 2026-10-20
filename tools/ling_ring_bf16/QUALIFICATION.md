@@ -1,3 +1,5 @@
+Historical component gate; current integration scope: [UPSTREAM_QUALIFICATION_20261020.md](UPSTREAM_QUALIFICATION_20261020.md).
+
 # BF16 expert component qualification
 
 Measured on 16 October 2026 with NVIDIA RTX 4070 Ti (sm_89), driver 595.91.07,

@@ -1,0 +1,52 @@
+{
+  "attribution": "AI Identity Incorported <james@aiii.id>",
+  "cpu_subtests": 9,
+  "cpu_tests": 227,
+  "fresh_ling_quality_gate_passed": false,
+  "frozen_pilot_source": "763f5161f45271bb31e914474e2a0f1af30d1d28",
+  "implementation_source": "22942f42038083cf063c48d8ae13093d94c9e2c7",
+  "new_gpu_replay_scope": "four retained positions per model; bitwise layers, hidden, logits, ordered routes; full checkpoint verification",
+  "production_admitted": false,
+  "quantized": false,
+  "records": {
+    "build_handoff": {
+      "path": "/work/AI/experiments/strata-upstream-integration-20261020-r1/INTEGRATION-HANDOFF.json",
+      "sha256": "725500d3a6944686af2907e89c2c2391b2ad7e6abcc6b319cf37ed2f4d925aff"
+    },
+    "cache_trace_analysis": {
+      "path": "/work/AI/src/strata-ling-ring-current-20261020/tools/ling_ring_bf16/cache_trace/RESULTS.json",
+      "sha256": "43efcc62d91b965007f6ced841424fea7e3e3fb12bb98546d3a660df37bd28a3"
+    },
+    "cpu": {
+      "path": "/work/AI/experiments/strata-upstream-final-cpu-20261020-r3/RESULT.json",
+      "sha256": "eb953c3e207c2facfcec64bea64bd47cb916bb763cd260997a06bfea5c815b59"
+    },
+    "framework_cpu": {
+      "path": "/work/AI/experiments/strata-upstream-framework-smoke-20261020-r2/RESULTS.json",
+      "sha256": "dbc93a2cc6b19922f93a4b7a8b1152ffb219e22fc64e629de36e17e480f95b1c"
+    },
+    "pilot_result": {
+      "path": "/work/AI/experiments/strata-ling-fresh-modes-20261020-r1/runs/RESULT.json",
+      "sha256": "8a0e9991311688d15fda39c15e8a5de66ae81c05e10f17bfa5a56a55f27b4d08"
+    },
+    "pilot_timeout_audit": {
+      "path": "/work/AI/experiments/strata-ling-fresh-timeout-audit-20261020-r1/FINAL-AUDIT.json",
+      "sha256": "ab3df76add6d8fb47bdd4988232cb9e5f15d143a4b7db16572b439d982fc0dd7"
+    },
+    "replay_cpu_review": {
+      "path": "/work/AI/experiments/strata-upstream-native-replay-review-20261020-r2/REVIEW.json",
+      "sha256": "8059a5a72b684a74b631bf11cd9928ceb8354a13e8cde65fe13da70c9e68f519"
+    },
+    "replay_freeze": {
+      "path": "/work/AI/experiments/strata-upstream-native-replay-20261020-r1/functional-r1/FREEZE.json",
+      "sha256": "5a8f79baf083b5b1a688c1ad9b390ac6aac43b61c55a080cbbe50f0fd8395a65"
+    },
+    "replay_result": {
+      "path": "/work/AI/experiments/strata-upstream-native-replay-20261020-r1/functional-r1/RESULT.json",
+      "sha256": "a4354c1a716a806485ac0b3c8fd4e77ea9cfb743cc84cf17682aabc5494e301d"
+    }
+  },
+  "sev_actions": [],
+  "upstream_main": "57293b8ec57203a741dc7b2abd69f24f077037ab",
+  "weights_changed": false
+}
