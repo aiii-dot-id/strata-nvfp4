@@ -1,0 +1,149 @@
+{
+  "accounting_implementation_source": "40842a43e6e6e98932786ca3de8bb9c14ed8bf1d",
+  "attribution": "AI Identity Incorported <james@aiii.id>",
+  "cache_default_changed": false,
+  "cache_observation": {
+    "cache_misses_1g": 23638,
+    "cache_misses_2g": 18610,
+    "cache_payload_bytes_1g": 1071120384,
+    "cache_payload_bytes_2g": 2146959360,
+    "miss_reduction_percent": 21.270835096031814,
+    "native_seconds_1g": 54.636480458,
+    "native_seconds_2g": 57.213968671,
+    "passed": true,
+    "prediction_matched": true,
+    "scope": "one retained Ling195 trace; timing observational, no workflow promotion",
+    "stable_payloads_exact": true
+  },
+  "checkpoint_weights_changed": false,
+  "final_cpu": {
+    "cuda_disabled": true,
+    "engine_source": "40842a43e6e6e98932786ca3de8bb9c14ed8bf1d",
+    "passed": true,
+    "pending_additions": "exact observer and tests pinned by final_cpu record; publication adds documentation",
+    "subtests": 9,
+    "tests": 229
+  },
+  "fresh_capability_gain_established": false,
+  "frozen_research_source": "763f5161f45271bb31e914474e2a0f1af30d1d28",
+  "long_and_generation_source_head": "9ff03254940470e4b6b860ae31e745104244795d",
+  "numerical_scope": "original BF16 checkpoint payloads widened to FP32; declared original-source comparison tolerances; retained native payloads compared bitwise",
+  "observer_sha256": "b58a80201b00ce09fa59b100c0068a5bb0e85e63d6762628ca8604933d633042",
+  "production_admitted": false,
+  "qualified_executables": {
+    "ling_after_accounting": {
+      "capacity_payload_bytes": 89702400,
+      "generated_tokens_including_eos": 146,
+      "generated_trajectory_positions": [
+        195
+      ],
+      "live_payload_bytes": 44605440,
+      "retained_replay_positions": [
+        4
+      ],
+      "sha256": "9ddbf37232ff4add1c7a07a46366315031fb9b25547140023eaacb0de862c086"
+    },
+    "ling_before_accounting": {
+      "generated_trajectory_positions": [
+        195,
+        358
+      ],
+      "long_replay_positions": [
+        195,
+        358
+      ],
+      "sha256": "dd1a638dedae9bfb761792b7265280166305c4695624377c4a9160965d27a8e9"
+    },
+    "ring": {
+      "generated_trajectory_positions": [
+        375
+      ],
+      "long_replay_positions": [
+        1031
+      ],
+      "sha256": "63c206ea61b07229c3a847df393fe1fba3578d626587a79073958cd83b24985b"
+    }
+  },
+  "quantized": false,
+  "records": {
+    "accounting_cpu_no_torch": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-build-20261020-r1/no-torch/Testing/Temporary/LastTest.log",
+      "sha256": "f3f01f33e6d04be49fe5ae010d38c62ca60735f01ab8f30bbe4333a3236bdce9"
+    },
+    "accounting_cpu_torch": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-build-20261020-r1/torch/Testing/Temporary/LastTest.log",
+      "sha256": "db829972e2c8d811643faa3425575f716d1fbfd853a73e5ad55efbbaa0203375"
+    },
+    "accounting_four_position_result": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-gate-20261020-r1/execution/RESULT.json",
+      "sha256": "f918dc8b2bfe5985d834e3e65979357c04aa5df9b8e9af98cf6d72988899d83d"
+    },
+    "accounting_four_position_review": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-gate-review-20261020-r1/AUDIT.json",
+      "sha256": "7ff085507a59931d364e6789f125d1560c63627ffc30cba0d84ecf1824d6461d"
+    },
+    "accounting_generation_result": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-generation-20261020-r1/results/RESULT.json",
+      "sha256": "6e7687ea21676b42833804e898123e28a763aaf5091feb84b292545104ddcf78"
+    },
+    "accounting_generation_review": {
+      "path": "/work/AI/experiments/strata-ling-state-accounting-review-20261020-r1/AUDIT.json",
+      "sha256": "e17ad75d56f9bd93c0fa50d498aa1466184c138960cf17322f816bce40be1955"
+    },
+    "cache_comparison": {
+      "path": "/work/AI/experiments/strata-ling-cache-capacity-20261020-r1/execution/CACHE-COMPARISON.json",
+      "sha256": "22dc7b561af50b143fa095c62c3b973f390580e819314154420211dead701041"
+    },
+    "cache_result": {
+      "path": "/work/AI/experiments/strata-ling-cache-capacity-20261020-r1/execution/RESULT.json",
+      "sha256": "6e61ce376ada77704fb06aef347f2d56dd4f3acd6a2b5222b0c72b404f38743f"
+    },
+    "combined_postflight": {
+      "path": "/work/AI/experiments/strata-next-gate-completion-20261020-r1/POSTFLIGHT.json",
+      "sha256": "4221de3ab9db2b4a5b5d978ab26d61361a9e6c9bfa54156713a573ec471fff39"
+    },
+    "final_cpu": {
+      "path": "/work/AI/experiments/strata-next-gate-completion-20261020-r1/FINAL-CPU.json",
+      "sha256": "27fd03afe4367db5b8f1cb7529318c002ceebe48df09eb35ef099912ceeebde5"
+    },
+    "generation_freeze": {
+      "path": "/work/AI/experiments/strata-upstream-cached-original-generation-gate-20261020-r1/results/FREEZE.json",
+      "sha256": "c2266cf1796763379becbb7fa718a56c9aa466670b8de2d9cb37ab551ac4c2f4"
+    },
+    "generation_result": {
+      "path": "/work/AI/experiments/strata-upstream-cached-original-generation-gate-20261020-r1/results/RESULT.json",
+      "sha256": "b7e5ce9acc08f2115f64de977a2c3dfcf2b5a3c65d0b928920e4479f04403482"
+    },
+    "generation_review": {
+      "path": "/work/AI/experiments/strata-upstream-cached-original-generation-gate-review-20261020-r1/FINAL-REVIEW.json",
+      "sha256": "f68d24880b3fa81dd39643a8ed9cb7872c04fdcfce2334b56b5b963db093da9c"
+    },
+    "long_replay_postflight": {
+      "path": "/work/AI/experiments/strata-current-long-replay-20261020-r2/execution/POSTFLIGHT.json",
+      "sha256": "ce6ccf2861086cdeb7c82e145a06434b9ebb8cef0a2ab60fca9b2861c106025f"
+    },
+    "long_replay_result": {
+      "path": "/work/AI/experiments/strata-current-long-replay-20261020-r2/execution/RESULT.json",
+      "sha256": "69da339151840ee82ed8060a9a96e359c287d1c44385adbf01f4cff29ce24171"
+    },
+    "long_replay_review": {
+      "path": "/work/AI/experiments/strata-current-long-replay-review-20261020-r2/FINAL-REVIEW.json",
+      "sha256": "7868f7f2f62e39f62e439b335c0d8cf99fe224c6a2b5fecd07608fc56530715d"
+    },
+    "profile_summary": {
+      "path": "/work/AI/experiments/strata-current-long-replay-20261020-r2/execution/PROFILE-SUMMARY.json",
+      "sha256": "130e18fcb01fafbb6a9479f95b5cea0b3736a6784593c94faacd4d4f0a6de957"
+    }
+  },
+  "remaining": [
+    "complete full-model continuation snapshot/fork/rollback",
+    "fresh externally verified workflow comparison with independent held-out validation",
+    "targeted copy/kernel/verification profiling",
+    "qualified Strata training/backward/resume and research intervention boundary",
+    "recurrence/refiner comparisons only against the stronger verified baseline"
+  ],
+  "schema": "strata-next-gate-20261020-v1",
+  "service_actions": [],
+  "sev_actions": [],
+  "upstream_main": "57293b8ec57203a741dc7b2abd69f24f077037ab"
+}
