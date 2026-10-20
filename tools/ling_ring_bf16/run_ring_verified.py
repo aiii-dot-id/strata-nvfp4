@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+
+from verified_hash import require_hash_workers, sha256_file, sha256_files
 import json
 import math
 import os
@@ -97,11 +99,7 @@ EXPECTED_NATIVE = (
 
 
 def _sha(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
+    return sha256_file(path)
 
 
 def _file(path: Path, label: str) -> Path:
@@ -126,7 +124,7 @@ def _read_json(path: Path, label: str):
         raise VerificationError(f"invalid {label}: {exc}") from exc
 
 
-def _checkpoint_files(checkpoint: Path) -> tuple[dict, dict]:
+def _checkpoint_files(checkpoint: Path, hash_workers: int = 1) -> tuple[dict, dict]:
     config = _file(checkpoint / "config.json", "config")
     index = _file(checkpoint / "model.safetensors.index.json", "index")
     index_data = _read_json(index, "checkpoint index")
@@ -143,9 +141,11 @@ def _checkpoint_files(checkpoint: Path) -> tuple[dict, dict]:
         "index": {"path": str(index), "sha256": _sha(index), "size": index.stat().st_size},
         "shards": {},
     }
-    for name in sorted(names):
-        shard = _file(checkpoint / name, f"shard {name}")
-        files["shards"][name] = {"sha256": _sha(shard), "size": shard.stat().st_size}
+    shard_paths = {name: _file(checkpoint / name, f"shard {name}") for name in sorted(names)}
+    digests = sha256_files((shard_paths[name] for name in sorted(names)), hash_workers)
+    for name, digest in zip(sorted(names), digests):
+        shard = shard_paths[name]
+        files["shards"][name] = {"sha256": digest, "size": shard.stat().st_size}
     return files, index_data
 
 
@@ -172,6 +172,7 @@ def _source_files(checkpoint: Path, repo: Path, router: str = "native", executab
         repo / "tools/ling_ring_bf16/ring_original_reference.py",
         repo / "tools/ling_ring_bf16/compare_ring_reference.py",
         repo / "tools/ling_ring_bf16/run_ring_verified.py",
+        repo / "tools/ling_ring_bf16/verified_hash.py",
         repo / "tools/ling_ring_bf16/generate_ring.py",
     ]
     if executable is not None:
@@ -213,8 +214,9 @@ def _source_files(checkpoint: Path, repo: Path, router: str = "native", executab
 
 
 def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), router: str = "native",
-                rms_mode: str = "native", attention_backend: str = "native", pointwise: str = "native") -> dict:
-    checkpoint_files, _ = _checkpoint_files(checkpoint)
+                rms_mode: str = "native", attention_backend: str = "native", pointwise: str = "native",
+                hash_workers: int = 1) -> dict:
+    checkpoint_files, _ = _checkpoint_files(checkpoint, hash_workers)
     original, relevant = _source_files(checkpoint, repo, router, executable, rms_mode, attention_backend, pointwise)
     frontend = {}
     for path in binding_files:
@@ -367,7 +369,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                  attention_order: str = "native", attention_scale: str = "native",
                  rope_frequency: str = "native", rms_mode: str = "native",
                  attention_backend: str = "native", pointwise: str = "native",
-                 lm_head_residency: str = "off") -> dict:
+                 lm_head_residency: str = "off", hash_workers: int = 1) -> dict:
     checkpoint = checkpoint.resolve()
     manifest = manifest.resolve()
     executable = executable.resolve()
@@ -400,6 +402,10 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("pointwise backend must be native or torch-cuda")
     if lm_head_residency not in {"off", "cuda"}:
         raise VerificationError("lm_head_residency must be off or cuda")
+    try:
+        require_hash_workers(hash_workers)
+    except ValueError as exc:
+        raise VerificationError(str(exc)) from exc
     if attention_backend == "torch-cuda" and (attention_order != "native" or attention_scale != "native"):
         raise VerificationError("torch-cuda attention owns the source attention order and scale")
     if generate and logits_mode != "all":
@@ -432,7 +438,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
             raise VerificationError("requested manifest differs from freshly prepared manifest")
 
     manifest_hash = _sha(manifest)
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise, hash_workers)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), manifest_hash,
             "--matmul", matmul]
     if router != "native":
@@ -461,7 +467,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     if not output.is_dir():
         raise VerificationError("Ring executable did not create output directory")
 
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise, hash_workers)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
     execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul, lm_head_residency)
@@ -505,6 +511,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         "rope_frequency": rope_frequency,
         "attention_value_order": attention_order, "attention_score_scale": attention_scale,
         "rms_mode": rms_mode, "attention_backend": attention_backend, "pointwise_backend": pointwise, "lm_head_residency": lm_head_residency,
+        "verification_hash_workers": hash_workers,
         "execution": execution,
         "native_outputs": native,
         "scope": {
@@ -541,6 +548,7 @@ def main() -> int:
     parser.add_argument("--attention-backend", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
+    parser.add_argument("--hash-workers", type=int, choices=range(1, 5), default=1)
     parser.add_argument("--attention-order", choices=("native", "normalized-first"), default="native")
     parser.add_argument("--attention-scale", choices=("native", "divide"), default="native")
     parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
@@ -555,7 +563,7 @@ def main() -> int:
                                      timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul, router=args.router,
                                      attention_order=args.attention_order, attention_scale=args.attention_scale,
                                      rope_frequency=args.rope_frequency, rms_mode=args.rms_mode,
-                                     attention_backend=args.attention_backend, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency), indent=2, sort_keys=True))
+                                     attention_backend=args.attention_backend, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency, hash_workers=args.hash_workers), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

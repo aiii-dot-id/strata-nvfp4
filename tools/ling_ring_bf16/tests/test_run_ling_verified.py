@@ -30,7 +30,7 @@ def test_ling_source_closure_matches_linked_ring_units(tmp_path):
         "src/kernels/cuda/s26_tsum.cuh", "tools/ling_ring_bf16/prepare_ling_manifest.py",
         "tools/ling_ring_bf16/ling/CMakeLists.txt", "tools/ling_ring_bf16/run_ling_verified.py",
         "tools/ling_ring_bf16/ling/ling_torch_ops.hpp", "tools/ling_ring_bf16/ling/ling_torch_ops.cpp",
-        "tools/ling_ring_bf16/generate_ling.py",
+        "tools/ling_ring_bf16/generate_ling.py", "tools/ling_ring_bf16/verified_hash.py",
     ]
     for name in required:
         path = repo / name
@@ -273,7 +273,7 @@ def test_ling_source_closure_excludes_unlinked_ring_headers(tmp_path):
     checkpoint = tmp_path / "checkpoint"; checkpoint.mkdir()
     for name in ("modeling_bailing_moe_v3.py", "configuration_bailing_moe_v3.py"): (checkpoint / name).write_text(name)
     repo = tmp_path / "repo"
-    required = ["include/strata/ling/x.hpp", "src/ling/engine.cu", "include/strata/kernels/bf16_gemv.hpp", "include/strata/kernels/bf16_bits.hpp", "include/strata/kernels/pdl.hpp", "src/kernels/cuda/native_bf16.cu", "src/kernels/cuda/s26_tsum.cuh", "tools/ling_ring_bf16/prepare_ling_manifest.py", "tools/ling_ring_bf16/ling/CMakeLists.txt", "tools/ling_ring_bf16/run_ling_verified.py", "tools/ling_ring_bf16/generate_ling.py"]
+    required = ["include/strata/ling/x.hpp", "src/ling/engine.cu", "include/strata/kernels/bf16_gemv.hpp", "include/strata/kernels/bf16_bits.hpp", "include/strata/kernels/pdl.hpp", "src/kernels/cuda/native_bf16.cu", "src/kernels/cuda/s26_tsum.cuh", "tools/ling_ring_bf16/prepare_ling_manifest.py", "tools/ling_ring_bf16/ling/CMakeLists.txt", "tools/ling_ring_bf16/run_ling_verified.py", "tools/ling_ring_bf16/generate_ling.py", "tools/ling_ring_bf16/verified_hash.py"]
     ring = ["expert_cache.hpp", "generation.hpp", "numerics.hpp", "routing.hpp", "tensor_store.hpp"]
     for name in required + ["include/strata/ring/" + x for x in ring] + ["src/ring/routing.cpp", "src/ring/expert_cache.cpp", "src/ring/tensor_store.cpp"]:
         q=repo/name; q.parent.mkdir(parents=True,exist_ok=True); q.write_text(name)

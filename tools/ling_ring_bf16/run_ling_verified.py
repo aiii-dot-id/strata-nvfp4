@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+
+from verified_hash import require_hash_workers, sha256_file, sha256_files
 import json
 import math
 import os
@@ -92,11 +94,7 @@ def _run_owned(argv: list[str], timeout: float) -> tuple[int, str, str]:
 
 
 def _sha(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
+    return sha256_file(path)
 
 
 def _file(path: Path, label: str) -> Path:
@@ -126,7 +124,7 @@ def _pin(path: Path, label: str) -> dict:
     return {"path": str(path), "sha256": _sha(path), "size": path.stat().st_size}
 
 
-def _checkpoint_files(checkpoint: Path) -> dict:
+def _checkpoint_files(checkpoint: Path, hash_workers: int = 1) -> dict:
     config = _file(checkpoint / "config.json", "config")
     index = _file(checkpoint / "model.safetensors.index.json", "index")
     data = _read_json(index, "checkpoint index")
@@ -141,8 +139,11 @@ def _checkpoint_files(checkpoint: Path) -> dict:
     if len(names) != 32:
         raise VerificationError(f"Ling checkpoint must contain exactly 32 shards, found {len(names)}")
     files = {"config": _pin(config, "config"), "index": _pin(index, "index"), "shards": {}}
-    for name in sorted(names):
-        files["shards"][name] = _pin(checkpoint / name, f"shard {name}")
+    shard_paths = {name: _file(checkpoint / name, f"shard {name}") for name in sorted(names)}
+    digests = sha256_files((shard_paths[name] for name in sorted(names)), hash_workers)
+    for name, digest in zip(sorted(names), digests):
+        shard = shard_paths[name]
+        files["shards"][name] = {"path": str(shard), "sha256": digest, "size": shard.stat().st_size}
     return files
 
 
@@ -209,6 +210,7 @@ def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, 
         repo / "tools/ling_ring_bf16/ling/CMakeLists.txt",
         *sorted((repo / "tools/ling_ring_bf16/ling").glob("ling_torch_ops.*")),
         repo / "tools/ling_ring_bf16/run_ling_verified.py",
+        repo / "tools/ling_ring_bf16/verified_hash.py",
         repo / "tools/ling_ring_bf16/generate_ling.py",
     ]
     relevant = {}
@@ -226,7 +228,7 @@ def _source_files(checkpoint: Path, repo: Path, executable: Path | None = None, 
     return original, relevant
 
 
-def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
+def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, binding_files=(), matmul: str = "bf16-gemv", pointwise: str = "native", hash_workers: int = 1) -> dict:
     original, relevant = (_source_files(checkpoint, repo) if matmul == "bf16-gemv" and pointwise == "native" else _source_files(checkpoint, repo, executable, matmul, pointwise))
     frontend = {}
     for path in binding_files:
@@ -234,7 +236,7 @@ def _all_inputs(checkpoint: Path, manifest: Path, executable: Path, repo: Path, 
         try: name = str(path.relative_to(checkpoint))
         except ValueError as exc: raise VerificationError("frontend binding must be inside checkpoint") from exc
         frontend[name] = _pin(path, "frontend binding")
-    return {"checkpoint": _checkpoint_files(checkpoint), "original_source": original,
+    return {"checkpoint": _checkpoint_files(checkpoint, hash_workers), "original_source": original,
             "relevant_source": relevant,
             "runtime_libraries": {k: v for k, v in relevant.items() if k.startswith("external:")},
             "manifest": _pin(manifest, "manifest"),
@@ -433,7 +435,7 @@ def _native_outputs(output: Path, tokens: int, generation: bool = False, route_p
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path,
                  cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None,
                  binding_files=(), route_probe=None, rope_frequency: str = "native",
-                 rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native", lm_head_residency: str = "off") -> dict:
+                 rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native", lm_head_residency: str = "off", hash_workers: int = 1) -> dict:
     checkpoint, manifest, executable, output = (Path(x).resolve() for x in (checkpoint, manifest, executable, output))
     repo = Path(__file__).resolve().parents[2]
     token_ids = _tokens(tokens)
@@ -448,6 +450,10 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("pointwise must be native or torch-cuda")
     if lm_head_residency not in {"off", "cuda"}:
         raise VerificationError("lm_head_residency must be off or cuda")
+    try:
+        require_hash_workers(hash_workers)
+    except ValueError as exc:
+        raise VerificationError(str(exc)) from exc
     if output.exists():
         raise VerificationError(f"refusing existing output: {output}")
     if type(cache_mib) is not int or not 5 <= cache_mib <= 2048:
@@ -477,7 +483,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     checkpoint_id = _sha(manifest)
     if generate and not {"tokenizer.json", "tokenizer_config.json", "generation_config.json"} <= {Path(x).name for x in binding_files}:
         raise VerificationError("generation requires tokenizer and generation-config bindings")
-    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise)
+    before = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise, hash_workers)
     argv = [str(executable), str(checkpoint), str(manifest), tokens, str(output), str(cache_mib), checkpoint_id]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos))]
@@ -491,7 +497,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError(f"Ling executable failed ({returncode}): {stderr.strip()[-2000:]}")
     if not output.is_dir():
         raise VerificationError("Ling executable did not create output directory")
-    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise)
+    after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise, hash_workers)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
     execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul, pointwise, lm_head_residency)
@@ -506,6 +512,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                "manifest": before["manifest"], "executable": before["executable"], "frontend": before["frontend"], "argv": argv,
                "cache_mib": cache_mib, "execution": execution, "native_outputs": native,
                "pointwise_mode": pointwise, "lm_head_residency": lm_head_residency,
+               "verification_hash_workers": hash_workers,
                "pointwise_scope": ("native operations" if pointwise == "native" else
                                    "ATen CUDA general RMS, router selection/weights, KDA beta and composed output norm/gate, SwiGLU, and MoE weighted reduction; KDA recurrence remains native C++"),
                "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, original model/configuration sources, and the Ling build source closure (all Ling sources/headers, shared headers, the three linked Ring translation units, CUDA kernels, CMake, wrapper, and frontend) hashed before and after execution",
@@ -539,9 +546,10 @@ def main() -> int:
     parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
+    parser.add_argument("--hash-workers", type=int, choices=range(1, 5), default=1)
     args = parser.parse_args()
     try:
-        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency), indent=2, sort_keys=True))
+        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency, hash_workers=args.hash_workers), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

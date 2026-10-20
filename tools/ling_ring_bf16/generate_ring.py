@@ -61,7 +61,7 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
              logits_mode: str = "all", timeout: float = 1800, rope_frequency: str = "native",
              attention_order: str = "native", attention_scale: str = "native", rms_mode: str = "native",
              matmul: str = "bf16-gemv", router: str = "native",
-             attention_backend: str = "native", pointwise: str = "native", lm_head_residency: str = "off") -> dict:
+             attention_backend: str = "native", pointwise: str = "native", lm_head_residency: str = "off", hash_workers: int = 1) -> dict:
     checkpoint = checkpoint.resolve()
     if max_new_tokens < 1 or max_new_tokens > 4096:
         raise VerificationError("max_new_tokens must be in 1..4096")
@@ -100,7 +100,7 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
                            logits_mode=logits_mode, binding_files=binding, timeout=timeout,
                            rope_frequency=rope_frequency, attention_order=attention_order, attention_scale=attention_scale,
                            rms_mode=rms_mode, matmul=matmul, router=router,
-                           attention_backend=attention_backend, pointwise=pointwise, lm_head_residency=lm_head_residency)
+                           attention_backend=attention_backend, pointwise=pointwise, lm_head_residency=lm_head_residency, hash_workers=hash_workers)
     generation_receipt = receipt["generation"]
     generated_ids = generation_receipt["generated_token_ids"]
     try:
@@ -121,7 +121,7 @@ def generate(checkpoint: Path, manifest: Path, executable: Path, prompt: str, ou
         "rope_frequency": rope_frequency, "attention_value_order": attention_order, "attention_score_scale": attention_scale,
         "rms_mode": rms_mode, "matmul_backend": matmul, "router_backend": router,
         "attention_backend": attention_backend, "pointwise_backend": pointwise,
-        "lm_head_residency": lm_head_residency,
+        "lm_head_residency": lm_head_residency, "verification_hash_workers": hash_workers,
         "bindings": receipt["frontend"],
     }
     (output / "frontend.json").write_text(json.dumps(frontend, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -149,6 +149,7 @@ def main() -> int:
     parser.add_argument("--attention-backend", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
+    parser.add_argument("--hash-workers", type=int, choices=range(1, 5), default=1)
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args()
     try:
@@ -156,7 +157,7 @@ def main() -> int:
                           args.cache_mib, args.max_new_tokens, args.system, args.logits_mode, args.timeout,
                           args.rope_frequency, args.attention_order, args.attention_scale, args.rms_mode,
                           args.matmul, args.router, attention_backend=args.attention_backend,
-                          pointwise=args.pointwise, lm_head_residency=args.lm_head_residency)
+                          pointwise=args.pointwise, lm_head_residency=args.lm_head_residency, hash_workers=args.hash_workers)
         print(result["frontend"]["decoded"], end="")
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
