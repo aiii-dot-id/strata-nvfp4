@@ -438,7 +438,7 @@ class Fetch(unittest.TestCase):
             setup.download(url, self.dst, "ple.gguf", unpinned_ok=False)
         self.assertTrue(asked)
         self.assertFalse(any("/resolve/main/" in u for u in asked), asked)
-        self.assertIn("not at its pinned revision any more", out.getvalue())
+        self.assertIn("the pinned version of ple.gguf is no longer on Hugging Face", out.getvalue())   # upstream 0.2.0's words
 
     def test_a_linked_file_drops_its_part(self):
         data = b"P" * (64 << 20)
@@ -960,8 +960,7 @@ class Uncensored(unittest.TestCase):
             with self.subTest(argv=argv):
                 code, out, cfg, _ = run(ram, found, argv)
                 self.assertEqual(code, 0, out[-3000:])
-                self.assertEqual(sampling_defaults_from_config(cfg), {"experimental_speed_projection": on,
-                                                                      **setup.QWEN_SAMPLING})
+                self.assertEqual(sampling_defaults_from_config(cfg), {"experimental_speed_projection": on})
 
     def test_on_writes_the_flags_and_the_request_default(self):
         ram, found = PROFILES["128GB-1x24GB"]

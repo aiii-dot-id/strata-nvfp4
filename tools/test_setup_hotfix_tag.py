@@ -24,8 +24,9 @@ class HotfixTag(unittest.TestCase):
         ver = tuple(int(x) for x in "0.1.40.3".split("."))   # a hotfix version has four numbers; MIN_ENGINE may have three
         self.assertEqual(len(ver), 4)
         self.assertLess(ver, setup.UPSTREAM_MIN_ENGINE)        # an installed hotfix of the older release is replaced
-        self.assertGreaterEqual((0, 1, 44, 1), setup.UPSTREAM_MIN_ENGINE)   # the minimum itself (or a later hotfix) is accepted
-        self.assertLess((0, 1, 44), setup.UPSTREAM_MIN_ENGINE)       # the release before the hotfix is replaced
+        self.assertGreaterEqual((0, 1, 45), setup.UPSTREAM_MIN_ENGINE)   # the minimum itself (or a later hotfix) is accepted
+        self.assertLess((0, 1, 44, 1), setup.UPSTREAM_MIN_ENGINE)    # the 0.1.44.1 hotfix is replaced
+        self.assertLess((0, 1, 44), setup.UPSTREAM_MIN_ENGINE)       # the release before is replaced
         self.assertLess((0, 1, 43, 1), setup.UPSTREAM_MIN_ENGINE)    # the 0.1.43.1 hotfix is replaced
         self.assertLess((0, 1, 42, 1), setup.UPSTREAM_MIN_ENGINE)    # 0.1.42.1 is replaced
         self.assertEqual(setup.version_tuple("0.1.40.2"), (0, 1, 40, 2))
@@ -47,7 +48,12 @@ class HotfixTag(unittest.TestCase):
         # a port to a new upstream release bumps VERSION with it: left behind, every installed fork engine would be
         # older than MIN_ENGINE and its own release "not published yet"
         self.assertGreaterEqual(setup.version_tuple(setup.release_version()), setup.UPSTREAM_MIN_ENGINE)
-        self.assertRegex(setup.release_version(), r"^\d+\.\d+\.\d+(\.\d+)?-nvfp4\.\d+$")
+        # upstream 0.2.0-beta: a pre-release word may sit between the upstream version and the fork's number
+        self.assertRegex(setup.release_version(), r"^\d+\.\d+\.\d+(\.\d+)?(-[A-Za-z]+\d*)?-nvfp4\.\d+$")
+        self.assertEqual(setup.version_tuple("0.2.0-beta-nvfp4.1"), (0, 2, 0, 0, 1))
+        self.assertEqual(setup.version_tuple("0.2.0-beta"), (0, 2, 0))
+        self.assertGreater(setup.version_tuple("0.2.0-beta-nvfp4.2"), setup.version_tuple("0.2.0-beta-nvfp4.1"))
+        self.assertGreater(setup.version_tuple("0.2.0-beta-nvfp4.1"), setup.version_tuple("0.1.44.1-nvfp4.2"))
 
     def test_the_engine_zips_are_found_for_a_hotfix_tag(self):
         # the fork's zips are under its release's tag first, the latest release second

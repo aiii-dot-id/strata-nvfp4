@@ -32,7 +32,7 @@ OUT = REPO / "dist" / "strata-nvfp4"
 CUDA = pathlib.Path(os.environ["CUDA_PATH"])
 CUDA_BIN = CUDA / "bin" / "x64" if (CUDA / "bin" / "x64" / "cublas64_13.dll").exists() else CUDA / "bin"
 LLAMA = REPO / "third_party" / "llama.cpp"
-VERSION = "0.1.44.1-nvfp4.1"
+VERSION = "0.2.0-beta-nvfp4.2"
 ZIP = REPO / "dist" / ("strata-nvfp4-v%s-windows-x64.zip" % VERSION)
 SETUP_ZIP = REPO / "dist" / "strata-windows-x64.zip"   # setup.py's PREBUILT_ASSET
 ENGINE = REPO / "build-release" / "strata.exe"
@@ -91,6 +91,13 @@ for dll in ("cublas64_13.dll", "cublasLt64_13.dll"):
 
 # the server (with its chat page) and the tools
 shutil.copytree(REPO / "serve", OUT / "serve", ignore=skip)
+# upstream 0.2.0: serve imports strata_control (engine_component, vision_reader, procs, presets, private_files) at start,
+# and /v1/telemetry strata_cli's client (stdlib only).  Not the rest of strata_cli: no `strata update` in this bundle
+# (update.cmd is its updater - tools/bundle_update.py, which `strata update` would only run; the server's update
+# notice is strata_control/fork_release.py).
+shutil.copytree(REPO / "strata_control", OUT / "strata_control", ignore=skip)
+for name in ("__init__.py", "client.py"):
+    cp(REPO / "strata_cli" / name, OUT / "strata_cli" / name)
 shutil.copytree(REPO / "tools", OUT / "tools", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "test_*.py", "vision"))
 
 # the part of llama.cpp the converter imports, at its pinned commit, with its license
