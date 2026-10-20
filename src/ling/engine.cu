@@ -127,6 +127,15 @@ struct CudaBackend final : sr::ExpertCache::Backend {
   }
 };
 enum class MatmulBackend { Bf16Gemv, Fp32Cublas };
+enum class LmHeadResidency { Off, Cuda };
+static LmHeadResidency parse_lm_head_residency(const std::string &v) {
+  if (v == "off") return LmHeadResidency::Off;
+  if (v == "cuda") return LmHeadResidency::Cuda;
+  throw std::invalid_argument("lm-head residency must be off or cuda");
+}
+static const char *lm_head_residency_name(LmHeadResidency v) {
+  return v == LmHeadResidency::Cuda ? "cuda" : "off";
+}
 static const char *matmul_backend_name(MatmulBackend b) { return b == MatmulBackend::Fp32Cublas ? "fp32-cublas" : "bf16-gemv"; }
 static MatmulBackend parse_matmul_backend(const std::string &v) {
   if (v == "bf16-gemv") return MatmulBackend::Bf16Gemv;
@@ -140,7 +149,12 @@ __global__ static void widen_bf16(const uint16_t *src, float *dst, size_t count)
 class Matvec {
   static constexpr size_t max_weight_bytes=size_t(157184)*1536*2;
   DeviceBuffer weight{max_weight_bytes}, x{4608*4}, y{157184*4};
-  MatmulBackend backend_; std::unique_ptr<DeviceBuffer> fp32_weight; cublasHandle_t cublas=nullptr;
+  MatmulBackend backend_; std::unique_ptr<DeviceBuffer> fp32_weight;
+  // Separate opt-in original-BF16 LM-head storage; matrix arithmetic remains
+  // apply_device(), so FP32 widening and pedantic cuBLAS order are unchanged.
+  std::unique_ptr<DeviceBuffer> resident_lm_head;
+  size_t resident_lm_head_bytes_=0, resident_lm_head_uploads_=0, resident_lm_head_apply_calls_=0;
+  cublasHandle_t cublas=nullptr;
 public:
   static constexpr size_t fp32_weight_bytes=size_t(157184)*1536*4;
   static constexpr size_t base_workspace_bytes=max_weight_bytes+4608*4+157184*4;
@@ -174,6 +188,21 @@ public:
     if(t.shape.size()!=2 || t.shape[0]==0 || t.shape[1]==0 || t.shape[1]!=input.size() || t.dtype!="BF16" || t.bytes>weight.bytes || t.shape[0] > max_weight_bytes / 2 / t.shape[1]) throw std::runtime_error("expected compatible original BF16 matrix");
     check(cudaMemcpy(weight.p,t.data,t.bytes,cudaMemcpyHostToDevice)); return apply_device(static_cast<uint16_t*>(weight.p),t.shape[0],t.shape[1],input);
   }
+  void pin_lm_head(const sr::TensorView &t) {
+    if(resident_lm_head || t.shape != std::vector<size_t>{157184,1536} || t.dtype!="BF16" || t.bytes!=max_weight_bytes)
+      throw std::runtime_error("lm-head residency requires original BF16 [157184,1536]");
+    resident_lm_head=std::make_unique<DeviceBuffer>(t.bytes);
+    check(cudaMemcpy(resident_lm_head->p,t.data,t.bytes,cudaMemcpyHostToDevice));
+    resident_lm_head_bytes_=t.bytes; ++resident_lm_head_uploads_;
+  }
+  std::vector<float> apply_lm_head(const std::vector<float> &input) {
+    if(!resident_lm_head) throw std::runtime_error("lm-head residency was requested but is not initialized");
+    ++resident_lm_head_apply_calls_;
+    return apply_device(static_cast<uint16_t*>(resident_lm_head->p),157184,1536,input);
+  }
+  size_t resident_lm_head_bytes() const { return resident_lm_head_bytes_; }
+  size_t resident_lm_head_uploads() const { return resident_lm_head_uploads_; }
+  size_t resident_lm_head_apply_calls() const { return resident_lm_head_apply_calls_; }
 };
 static std::vector<float> swiglu(std::vector<float> g,
                                  const std::vector<float> &u
@@ -382,14 +411,14 @@ static std::vector<float> mla_step(Matvec &mv, const sr::TensorStore &store,
 int main(int argc,char **argv) {
   try {
     if(argc < 7 || (argc - 7) % 2)
-      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --lm-head-residency off|cuda --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
 
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
     size_t generate=0; std::vector<int> eos; std::optional<RouteProbe> route_probe;
     sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
     sl::RmsMode rms_mode=sl::RmsMode::Native;
-    std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; std::vector<std::string> options;
+    std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; LmHeadResidency lm_head_residency=LmHeadResidency::Off; std::vector<std::string> options;
     for(int i=7;i<argc;i+=2) {
       const std::string option=argv[i];
       if(std::find(options.begin(),options.end(),option)!=options.end()) throw std::invalid_argument("duplicate option");
@@ -398,6 +427,7 @@ int main(int argc,char **argv) {
       else if(option=="--eos") eos=sr::vocabulary_ids(argv[i+1],157184);
       else if(option=="--route-probe") route_probe=parse_route_probe(argv[i+1]);
       else if(option=="--matmul") { matmul_name=argv[i+1]; matmul_backend=parse_matmul_backend(matmul_name); }
+      else if(option=="--lm-head-residency") lm_head_residency=parse_lm_head_residency(argv[i+1]);
       else if(option=="--rope-frequency") {
         rope_frequency_name=argv[i+1];
         if(rope_frequency_name=="original") rope_frequency=sl::MlaRopeFrequency::Original;
@@ -431,14 +461,26 @@ int main(int argc,char **argv) {
     const auto &embedding=store.tensor("model.word_embeddings.weight");
     shape(embedding,{157184,1536});
     if(embedding.dtype!="BF16") throw std::runtime_error("original BF16 embedding required");
+    const auto &lm_head=store.tensor("lm_head.weight");
+    shape(lm_head,{157184,1536});
+    if(lm_head.dtype!="BF16") throw std::runtime_error("original BF16 lm_head required");
     check(cudaSetDevice(0));
     cudaDeviceProp props{}; check(cudaGetDeviceProperties(&props,0));
     if(props.major!=8 || props.minor!=9) throw std::runtime_error("this target is qualified only for sm_89");
     size_t free=0,total=0; check(cudaMemGetInfo(&free,&total));
     const size_t budget=cache_mib*1024*1024;
-    if(free<budget+Matvec::workspace_bytes(matmul_backend)+size_t(512)*1024*1024)
+    constexpr size_t memory_margin=size_t(512)*1024*1024;
+    const size_t lm_head_residency_bytes=lm_head_residency==LmHeadResidency::Cuda ? lm_head.bytes : 0;
+    const size_t required=budget+Matvec::workspace_bytes(matmul_backend)+memory_margin+lm_head_residency_bytes;
+    if(free<required) {
+      if(lm_head_residency==LmHeadResidency::Cuda) throw std::runtime_error("insufficient free GPU memory for requested lm-head residency; no process will be stopped");
       throw std::runtime_error("insufficient free GPU memory; no process will be stopped");
+    }
     Matvec mv(matmul_backend);
+    if(lm_head_residency==LmHeadResidency::Cuda) {
+      try { mv.pin_lm_head(lm_head); }
+      catch(const std::exception &e) { throw std::runtime_error(std::string("requested lm-head residency initialization failed: ")+e.what()); }
+    }
 #ifdef STRATA_LING_TORCH_OPS
     std::unique_ptr<strata::ling_torch::Ops> torch_ops;
     if (pointwise_name == "torch-cuda") torch_ops=std::make_unique<strata::ling_torch::Ops>("cuda");
@@ -566,7 +608,7 @@ int main(int argc,char **argv) {
              , torch_ops.get()
 #endif
              );write_row(output/"final-hidden.f32",h);
-      auto logits=mv.apply(store.tensor("lm_head.weight"),h);write_row(output/"logits.f32",logits);
+      auto logits=lm_head_residency==LmHeadResidency::Cuda ? mv.apply_lm_head(h) : mv.apply(lm_head,h);write_row(output/"logits.f32",logits);
       if(generation.sampling_position(pos)) generation.sample(pos,logits);
       std::cerr<<"token "<<pos<<" complete; top1 "<<std::distance(logits.begin(),std::max_element(logits.begin(),logits.end()))<<'\n';
     }
@@ -593,7 +635,7 @@ int main(int argc,char **argv) {
       <<",\"cache_resident_bytes\":"<<stats.bytes<<",\"cache_device_payload_bytes\":"<<stats.bytes<<",\"cache_host_payload_bytes\":"<<stats.bytes
       <<",\"cache_payload_scope\":\"resident payload only; excludes allocator overhead, one staged expert, mmap pages and other working buffers\""
       <<",\"host_attention_state_bytes\":"<<(size_t(6)*tokens.size()*16*(192+128)+size_t(18)*(16*128*128+3*2048*4))*sizeof(float)
-      <<",\"matmul_backend\":\""<<matmul_backend_name(matmul_backend)<<"\",\"matmul_fp32_weight_scratch_bytes\":"<<Matvec::fp32_scratch_bytes(matmul_backend)<<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
+      <<",\"matmul_backend\":\""<<matmul_backend_name(matmul_backend)<<"\",\"lm_head_residency\":\""<<lm_head_residency_name(lm_head_residency)<<"\",\"lm_head_resident_bytes\":"<<mv.resident_lm_head_bytes()<<",\"lm_head_resident_uploads\":"<<mv.resident_lm_head_uploads()<<",\"lm_head_resident_apply_calls\":"<<mv.resident_lm_head_apply_calls()<<",\"matmul_fp32_weight_scratch_bytes\":"<<Matvec::fp32_scratch_bytes(matmul_backend)<<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
       <<",\"workspace_bytes\":"<<Matvec::workspace_bytes(matmul_backend)<<",\"wall_seconds\":"
       <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"}\n";
     std::ofstream out(output/"execution.json");out<<receipt.str();out.flush();

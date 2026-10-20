@@ -121,6 +121,15 @@ struct CudaBackend final : sr::ExpertCache::Backend {
   }
 };
 enum class MatmulBackend { Bf16Gemv, Fp32Cublas };
+enum class LmHeadResidency { Off, Cuda };
+static LmHeadResidency parse_lm_head_residency(const std::string &v) {
+  if (v == "off") return LmHeadResidency::Off;
+  if (v == "cuda") return LmHeadResidency::Cuda;
+  throw std::invalid_argument("lm-head residency must be off or cuda");
+}
+static const char *lm_head_residency_name(LmHeadResidency v) {
+  return v == LmHeadResidency::Cuda ? "cuda" : "off";
+}
 
 enum class RouterBackend { Native, TorchCuda };
 static RouterBackend parse_router_backend(const std::string &v) { if(v=="native") return RouterBackend::Native; if(v=="torch-cuda") return RouterBackend::TorchCuda; throw std::invalid_argument("router backend must be native or torch-cuda"); }
@@ -162,6 +171,13 @@ class Matvec {
   DeviceBuffer weight{size_t(157184) * 2048 * 2}, x{5120 * 4}, y{157184 * 4};
   MatmulBackend backend_;
   std::unique_ptr<DeviceBuffer> fp32_weight;
+  // Opt-in, separate from the reusable staging allocation. It preserves the
+  // original BF16 bytes and still routes through apply_device(), including
+  // the existing per-call FP32 widening and pedantic cuBLAS expression.
+  std::unique_ptr<DeviceBuffer> resident_lm_head;
+  size_t resident_lm_head_bytes_ = 0;
+  size_t resident_lm_head_uploads_ = 0;
+  size_t resident_lm_head_apply_calls_ = 0;
   cublasHandle_t cublas = nullptr;
 
 public:
@@ -231,6 +247,25 @@ public:
     return apply_device(static_cast<uint16_t *>(weight.p), t.shape[0],
                         t.shape[1], input);
   }
+  void pin_lm_head(const sr::TensorView &t) {
+    if (resident_lm_head || t.shape != std::vector<size_t>{157184, 2048} ||
+        t.dtype != "BF16" || t.bytes != max_weight_bytes)
+      throw std::runtime_error("lm-head residency requires original BF16 [157184,2048]");
+    resident_lm_head = std::make_unique<DeviceBuffer>(t.bytes);
+    check(cudaMemcpy(resident_lm_head->p, t.data, t.bytes, cudaMemcpyHostToDevice));
+    resident_lm_head_bytes_ = t.bytes;
+    ++resident_lm_head_uploads_;
+  }
+  std::vector<float> apply_lm_head(const std::vector<float> &input) {
+    if (!resident_lm_head)
+      throw std::runtime_error("lm-head residency was requested but is not initialized");
+    ++resident_lm_head_apply_calls_;
+    return apply_device(static_cast<uint16_t *>(resident_lm_head->p), 157184,
+                        2048, input);
+  }
+  size_t resident_lm_head_bytes() const { return resident_lm_head_bytes_; }
+  size_t resident_lm_head_uploads() const { return resident_lm_head_uploads_; }
+  size_t resident_lm_head_apply_calls() const { return resident_lm_head_apply_calls_; }
 };
 static std::vector<float> swiglu(std::vector<float> g,
                                  const std::vector<float> &u) {
@@ -346,7 +381,7 @@ int main(int argc, char **argv) {
           "usage: strata_ring_bf16 ROOT MANIFEST "
           "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
           "[--generate N --eos CSV] [--logits-mode all|last] "
-          "[--route-probe POS,LAYER] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-backend native|torch-cuda] [--pointwise native|torch-cuda] [--attention-order native|normalized-first] [--attention-scale native|divide]");
+          "[--route-probe POS,LAYER] [--lm-head-residency off|cuda] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-backend native|torch-cuda] [--pointwise native|torch-cuda] [--attention-order native|normalized-first] [--attention-scale native|divide]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
       throw std::runtime_error("refusing existing output directory");
@@ -362,6 +397,7 @@ int main(int argc, char **argv) {
     std::vector<int> eos;
     std::string logits_mode = "all";
     MatmulBackend matmul_backend = MatmulBackend::Bf16Gemv;
+    LmHeadResidency lm_head_residency = LmHeadResidency::Off;
     RouterBackend router_backend = RouterBackend::Native;
     RmsBackend rms_backend = RmsBackend::Native;
     AttentionBackend attention_backend = AttentionBackend::Native;
@@ -383,6 +419,8 @@ int main(int argc, char **argv) {
         logits_mode = argv[i + 1];
       else if (option == "--matmul")
         matmul_backend = parse_matmul_backend(argv[i + 1]);
+      else if (option == "--lm-head-residency")
+        lm_head_residency = parse_lm_head_residency(argv[i + 1]);
       else if (option == "--router")
         router_backend = parse_router_backend(argv[i + 1]);
       else if (option == "--rms-mode")
@@ -435,6 +473,10 @@ int main(int argc, char **argv) {
     shape(embedding, {157184, 2048});
     if (embedding.dtype != "BF16")
       throw std::runtime_error("original BF16 embedding required");
+    const auto &lm_head = store.tensor("lm_head.weight");
+    shape(lm_head, {157184, 2048});
+    if (lm_head.dtype != "BF16")
+      throw std::runtime_error("original BF16 lm_head required");
     check(cudaSetDevice(0));
     cudaDeviceProp props{};
     check(cudaGetDeviceProperties(&props, 0));
@@ -444,11 +486,23 @@ int main(int argc, char **argv) {
     check(cudaMemGetInfo(&free, &total));
     int cuda_runtime_version = 0; check(cudaRuntimeGetVersion(&cuda_runtime_version));
     const size_t budget = cache_mib * 1024 * 1024;
-    if (free < budget + Matvec::workspace_bytes(matmul_backend) +
-                    size_t(512) * 1024 * 1024)
-      throw std::runtime_error(
-          "insufficient free GPU memory; no process will be stopped");
+    constexpr size_t memory_margin = size_t(512) * 1024 * 1024;
+    const size_t lm_head_residency_bytes =
+        lm_head_residency == LmHeadResidency::Cuda ? lm_head.bytes : 0;
+    const size_t required = budget + Matvec::workspace_bytes(matmul_backend) +
+                            memory_margin + lm_head_residency_bytes;
+    if (free < required) {
+      if (lm_head_residency == LmHeadResidency::Cuda)
+        throw std::runtime_error("insufficient free GPU memory for requested lm-head residency; no process will be stopped");
+      throw std::runtime_error("insufficient free GPU memory; no process will be stopped");
+    }
     Matvec mv(matmul_backend);
+    if (lm_head_residency == LmHeadResidency::Cuda) {
+      try { mv.pin_lm_head(lm_head); }
+      catch (const std::exception &e) {
+        throw std::runtime_error(std::string("requested lm-head residency initialization failed: ") + e.what());
+      }
+    }
 #ifdef STRATA_TORCH_ROUTER
     std::unique_ptr<strata::torch_router::Router> torch_router;
     std::unique_ptr<strata::torch_router::Rms> torch_rms;
@@ -691,7 +745,8 @@ int main(int argc, char **argv) {
       h = apply_norm(h, store.tensor("model.norm.weight"));
       write_row(output / "final-hidden.f32", h);
       if (logits_mode == "all" || pos + 1 == tokens.size()) {
-        auto logits = mv.apply(store.tensor("lm_head.weight"), h);
+        auto logits = lm_head_residency == LmHeadResidency::Cuda
+                          ? mv.apply_lm_head(h) : mv.apply(lm_head, h);
         write_row(output / "logits.f32", logits);
         const auto top = std::distance(
             logits.begin(), std::max_element(logits.begin(), logits.end()));
@@ -756,7 +811,11 @@ int main(int argc, char **argv) {
             << ",\"pointwise_backend\":\"" << pointwise_backend_name(pointwise_backend) << "\""
             << ",\"matmul_backend\":\""
             << matmul_backend_name(matmul_backend)
-            << "\",\"router_backend\":\"" << router_backend_name(router_backend) << "\",\"rms_backend\":\"" << rms_backend_name(rms_backend) << "\",\"cuda_runtime_version\":" << cuda_runtime_version << ",\"matmul_fp32_weight_scratch_bytes\":"
+            << "\",\"lm_head_residency\":\"" << lm_head_residency_name(lm_head_residency)
+            << "\",\"lm_head_resident_bytes\":" << mv.resident_lm_head_bytes()
+            << ",\"lm_head_resident_uploads\":" << mv.resident_lm_head_uploads()
+            << ",\"lm_head_resident_apply_calls\":" << mv.resident_lm_head_apply_calls()
+            << ",\"router_backend\":\"" << router_backend_name(router_backend) << "\",\"rms_backend\":\"" << rms_backend_name(rms_backend) << "\",\"cuda_runtime_version\":" << cuda_runtime_version << ",\"matmul_fp32_weight_scratch_bytes\":"
             << Matvec::fp32_scratch_bytes(matmul_backend)
             << ",\"workspace_bytes\":"
             << Matvec::workspace_bytes(matmul_backend)

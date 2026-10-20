@@ -282,7 +282,7 @@ def _require_route_probe(path: Path, expected: tuple[int, int]) -> dict:
     return value
 
 def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
-                       generate: int = 0, matmul: str = "bf16-gemv") -> dict:
+                       generate: int = 0, matmul: str = "bf16-gemv", lm_head_residency: str = "off") -> dict:
     execution = _read_json(path, "execution receipt")
     required = {
         "status": "executed",
@@ -298,6 +298,25 @@ def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
             raise VerificationError(f"execution receipt mismatch: {key}")
     if type(execution.get("quantized")) is not bool or execution["quantized"] is not False:
         raise VerificationError("execution receipt mismatch: quantized")
+    # Historical receipts predate this optional mode, and are compatible only
+    # with the default off value. Requested residency requires its full accounting.
+    if execution.get("lm_head_residency", "off") != lm_head_residency:
+        raise VerificationError("execution receipt mismatch: lm_head_residency")
+    residency_fields = ("lm_head_resident_bytes", "lm_head_resident_uploads",
+                        "lm_head_resident_apply_calls")
+    if lm_head_residency == "cuda":
+        expected = (157184 * 2048 * 2, 1)
+        values = tuple(execution.get(key) for key in residency_fields)
+        if (any(type(value) is not int for value in values) or
+                values[:2] != expected):
+            raise VerificationError("execution lm-head residency accounting mismatch")
+        logits_tokens = execution.get("logits_tokens")
+        if type(logits_tokens) is not int or logits_tokens < 0 or values[2] != logits_tokens:
+            raise VerificationError("execution lm-head residency call count mismatch")
+    elif any(key in execution for key in residency_fields):
+        values = tuple(execution.get(key) for key in residency_fields)
+        if any(type(value) is not int for value in values) or values != (0, 0, 0):
+            raise VerificationError("off lm-head residency accounting mismatch")
     if type(execution.get("tokens")) is not int or any(type(x) is not int for x in execution.get("token_ids", [])):
         raise VerificationError("execution receipt has non-integer token identity")
     evaluated = execution.get("token_ids")
@@ -347,7 +366,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                  route_probe: str | None = None, matmul: str = "bf16-gemv", router: str = "native",
                  attention_order: str = "native", attention_scale: str = "native",
                  rope_frequency: str = "native", rms_mode: str = "native",
-                 attention_backend: str = "native", pointwise: str = "native") -> dict:
+                 attention_backend: str = "native", pointwise: str = "native",
+                 lm_head_residency: str = "off") -> dict:
     checkpoint = checkpoint.resolve()
     manifest = manifest.resolve()
     executable = executable.resolve()
@@ -378,6 +398,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("attention backend must be native or torch-cuda")
     if pointwise not in {"native", "torch-cuda"}:
         raise VerificationError("pointwise backend must be native or torch-cuda")
+    if lm_head_residency not in {"off", "cuda"}:
+        raise VerificationError("lm_head_residency must be off or cuda")
     if attention_backend == "torch-cuda" and (attention_order != "native" or attention_scale != "native"):
         raise VerificationError("torch-cuda attention owns the source attention order and scale")
     if generate and logits_mode != "all":
@@ -421,6 +443,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         argv += ["--attention-backend", attention_backend]
     if pointwise != "native":
         argv += ["--pointwise", pointwise]
+    if lm_head_residency != "off":
+        argv += ["--lm-head-residency", lm_head_residency]
     if generate:
         argv += ["--generate", str(generate), "--eos", ",".join(map(str, parsed_eos)), "--logits-mode", logits_mode]
     elif logits_mode != "all":
@@ -440,7 +464,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, router, rms_mode, attention_backend, pointwise)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul)
+    execution = _require_execution(output / "execution.json", token_ids, manifest_hash, generate, matmul, lm_head_residency)
     if execution.get("router_backend", "native") != router:
         raise VerificationError("execution router backend mismatch")
     if execution.get("rope_frequency", "native") != rope_frequency:
@@ -451,6 +475,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("execution attention backend mismatch")
     if execution.get("pointwise_backend", "native") != pointwise:
         raise VerificationError("execution pointwise backend mismatch")
+    if lm_head_residency == "cuda" and execution.get("lm_head_resident_apply_calls") != execution.get("logits_tokens"):
+        raise VerificationError("execution lm-head residency call count mismatch")
     if execution.get("attention_value_order", "native") != attention_order or execution.get("attention_score_scale", "native") != attention_scale:
         raise VerificationError("execution attention arithmetic profile mismatch")
     native = {}
@@ -478,7 +504,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         "matmul_backend": matmul,
         "rope_frequency": rope_frequency,
         "attention_value_order": attention_order, "attention_score_scale": attention_scale,
-        "rms_mode": rms_mode, "attention_backend": attention_backend, "pointwise_backend": pointwise,
+        "rms_mode": rms_mode, "attention_backend": attention_backend, "pointwise_backend": pointwise, "lm_head_residency": lm_head_residency,
         "execution": execution,
         "native_outputs": native,
         "scope": {
@@ -514,6 +540,7 @@ def main() -> int:
     parser.add_argument("--rms-mode", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--attention-backend", choices=("native", "torch-cuda"), default="native")
     parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
     parser.add_argument("--attention-order", choices=("native", "normalized-first"), default="native")
     parser.add_argument("--attention-scale", choices=("native", "divide"), default="native")
     parser.add_argument("--route-probe", help="capture one POS,LAYER router state")
@@ -528,7 +555,7 @@ def main() -> int:
                                      timeout=args.timeout, route_probe=args.route_probe, matmul=args.matmul, router=args.router,
                                      attention_order=args.attention_order, attention_scale=args.attention_scale,
                                      rope_frequency=args.rope_frequency, rms_mode=args.rms_mode,
-                                     attention_backend=args.attention_backend, pointwise=args.pointwise), indent=2, sort_keys=True))
+                                     attention_backend=args.attention_backend, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0

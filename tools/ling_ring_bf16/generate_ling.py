@@ -63,7 +63,7 @@ def _ids(value):
 
 def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_new_tokens,
              system=None, timeout=1800, eos_ids=None, thinking="auto", rope_frequency="native",
-             rms_mode="native", matmul="bf16-gemv", pointwise="native"):
+             rms_mode="native", matmul="bf16-gemv", pointwise="native", lm_head_residency="off"):
     checkpoint = Path(checkpoint).resolve()
     output = Path(output).resolve()
     if max_new_tokens < 1 or max_new_tokens > MAX_TOKENS:
@@ -78,6 +78,8 @@ def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_ne
         raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     if pointwise not in {"native", "torch-cuda"}:
         raise VerificationError("pointwise must be native or torch-cuda")
+    if lm_head_residency not in {"off", "cuda"}:
+        raise VerificationError("lm_head_residency must be off or cuda")
     binding = _binding_paths(checkpoint)
     before = _snapshot(binding)
     eos, eos_source = _eos_ids(checkpoint, eos_ids)
@@ -102,7 +104,7 @@ def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_ne
     receipt = run_verified(
         checkpoint, manifest, executable, ",".join(map(str, prompt_ids)), output,
         cache_mib, timeout, max_new_tokens, eos, binding_files=binding,
-        rope_frequency=rope_frequency, rms_mode=rms_mode, matmul=matmul, pointwise=pointwise)
+        rope_frequency=rope_frequency, rms_mode=rms_mode, matmul=matmul, pointwise=pointwise, lm_head_residency=lm_head_residency)
     generated = receipt["generation"]["generated_token_ids"]
     try:
         decoded = tokenizer.decode(generated, skip_special_tokens=False,
@@ -116,7 +118,7 @@ def generate(checkpoint, manifest, executable, prompt, output, cache_mib, max_ne
         "finish_reason": receipt["generation"]["finish_reason"],
         "decoded": decoded, "eos_token_ids": eos, "eos_source": eos_source,
         "max_new_tokens": max_new_tokens, "rope_frequency": rope_frequency,
-        "rms_mode": rms_mode, "matmul": matmul, "pointwise": pointwise,
+        "rms_mode": rms_mode, "matmul": matmul, "pointwise": pointwise, "lm_head_residency": lm_head_residency,
         "bindings": receipt["frontend"],
     }
     output.mkdir(parents=True, exist_ok=True)
@@ -141,13 +143,14 @@ def main():
     p.add_argument("--rms-mode", choices=("native", "torch-cuda-order"), default="native")
     p.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     p.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
+    p.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
     args = p.parse_args()
     try:
         explicit = None if args.eos_ids is None else [int(x, 10) for x in args.eos_ids.split(",")]
         result = generate(args.checkpoint, args.manifest, args.executable, args.prompt,
                           args.output, args.cache_mib, args.max_new_tokens, args.system,
                           args.timeout, explicit, args.thinking, args.rope_frequency,
-                          args.rms_mode, args.matmul, args.pointwise)
+                          args.rms_mode, args.matmul, args.pointwise, args.lm_head_residency)
         print(result["frontend"]["decoded"], end="")
     except (OSError, ValueError, VerificationError) as exc:
         p.error(str(exc))

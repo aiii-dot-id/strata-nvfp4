@@ -266,7 +266,7 @@ def _parse_route_probe(text: str) -> tuple[int, int]:
 
 def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
                        generate: int = 0, rope_frequency: str = "native",
-                       rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
+                       rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native", lm_head_residency: str = "off") -> dict:
     execution = _read_json(path, "execution receipt")
     expected = {"status": "executed", "model": MODEL, "activation_dtype": "FP32",
                 "quantized": False, "layers": LAYERS, "checkpoint_id": checkpoint_id,
@@ -278,6 +278,22 @@ def _require_execution(path: Path, token_ids: list[int], checkpoint_id: str,
             raise VerificationError(f"execution receipt mismatch: {key}")
     if type(execution.get("quantized")) is not bool or execution.get("quantized") is not False:
         raise VerificationError("execution quantized must be false boolean")
+    if execution.get("lm_head_residency", "off") != lm_head_residency:
+        raise VerificationError("execution receipt mismatch: lm_head_residency")
+    residency_fields = ("lm_head_resident_bytes", "lm_head_resident_uploads",
+                        "lm_head_resident_apply_calls")
+    if lm_head_residency == "cuda":
+        expected = (157184 * 1536 * 2, 1)
+        values = tuple(execution.get(key) for key in residency_fields)
+        if any(type(value) is not int for value in values) or values[:2] != expected:
+            raise VerificationError("execution lm-head residency accounting mismatch")
+        logits_tokens = execution.get("logits_tokens")
+        if type(logits_tokens) is not int or logits_tokens < 0 or values[2] != logits_tokens:
+            raise VerificationError("execution lm-head residency call count mismatch")
+    elif any(key in execution for key in residency_fields):
+        values = tuple(execution.get(key) for key in residency_fields)
+        if any(type(value) is not int for value in values) or values != (0, 0, 0):
+            raise VerificationError("off lm-head residency accounting mismatch")
     scratch = execution.get("matmul_fp32_weight_scratch_bytes")
     workspace = execution.get("workspace_bytes")
     if type(scratch) is not int or isinstance(scratch, bool) or scratch < 0 or type(workspace) is not int or isinstance(workspace, bool) or workspace < 0:
@@ -417,7 +433,7 @@ def _native_outputs(output: Path, tokens: int, generation: bool = False, route_p
 def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str, output: Path,
                  cache_mib: int, timeout: float = 1800, generate: int = 0, eos_ids=None,
                  binding_files=(), route_probe=None, rope_frequency: str = "native",
-                 rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native") -> dict:
+                 rms_mode: str = "native", matmul: str = "bf16-gemv", pointwise: str = "native", lm_head_residency: str = "off") -> dict:
     checkpoint, manifest, executable, output = (Path(x).resolve() for x in (checkpoint, manifest, executable, output))
     repo = Path(__file__).resolve().parents[2]
     token_ids = _tokens(tokens)
@@ -430,6 +446,8 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         raise VerificationError("matmul must be bf16-gemv or fp32-cublas")
     if pointwise not in {"native", "torch-cuda"}:
         raise VerificationError("pointwise must be native or torch-cuda")
+    if lm_head_residency not in {"off", "cuda"}:
+        raise VerificationError("lm_head_residency must be off or cuda")
     if output.exists():
         raise VerificationError(f"refusing existing output: {output}")
     if type(cache_mib) is not int or not 5 <= cache_mib <= 2048:
@@ -467,6 +485,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
         argv += ["--route-probe", f"{parsed_probe[0]},{parsed_probe[1]}"]
     argv += ["--rope-frequency", rope_frequency]
     argv += ["--rms-mode", rms_mode, "--matmul", matmul, "--pointwise", pointwise]
+    if lm_head_residency != "off": argv += ["--lm-head-residency", lm_head_residency]
     returncode, _stdout, stderr = _run_owned(argv, timeout)
     if returncode != 0:
         raise VerificationError(f"Ling executable failed ({returncode}): {stderr.strip()[-2000:]}")
@@ -475,7 +494,9 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
     after = _all_inputs(checkpoint, manifest, executable, repo, binding_files, matmul, pointwise)
     if before != after:
         raise VerificationError("checkpoint, executable, manifest, or source drifted during run")
-    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul, pointwise)
+    execution = _require_execution(output / "execution.json", token_ids, checkpoint_id, generate, rope_frequency, rms_mode, matmul, pointwise, lm_head_residency)
+    if lm_head_residency == "cuda" and execution.get("lm_head_resident_apply_calls") != execution.get("logits_tokens"):
+        raise VerificationError("execution lm-head residency call count mismatch")
     evaluated_tokens = len(execution.get("token_ids", token_ids))
     native = _native_outputs(output, evaluated_tokens, bool(generate), parsed_probe)
     receipt = {"schema": "strata-ling-verified-run-v1", "status": "verified",
@@ -484,7 +505,7 @@ def run_verified(checkpoint: Path, manifest: Path, executable: Path, tokens: str
                "runtime_libraries": before["runtime_libraries"],
                "manifest": before["manifest"], "executable": before["executable"], "frontend": before["frontend"], "argv": argv,
                "cache_mib": cache_mib, "execution": execution, "native_outputs": native,
-               "pointwise_mode": pointwise,
+               "pointwise_mode": pointwise, "lm_head_residency": lm_head_residency,
                "pointwise_scope": ("native operations" if pointwise == "native" else
                                    "ATen CUDA general RMS, router selection/weights, KDA beta and composed output norm/gate, SwiGLU, and MoE weighted reduction; KDA recurrence remains native C++"),
                "scope": {"checkpoint_files": "config, index, all 32 safetensors shards, original model/configuration sources, and the Ling build source closure (all Ling sources/headers, shared headers, the three linked Ring translation units, CUDA kernels, CMake, wrapper, and frontend) hashed before and after execution",
@@ -517,9 +538,10 @@ def main() -> int:
     parser.add_argument("--rms-mode", choices=("native", "torch-cuda-order"), default="native")
     parser.add_argument("--matmul", choices=("bf16-gemv", "fp32-cublas"), default="bf16-gemv")
     parser.add_argument("--pointwise", choices=("native", "torch-cuda"), default="native")
+    parser.add_argument("--lm-head-residency", choices=("off", "cuda"), default="off")
     args = parser.parse_args()
     try:
-        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul, pointwise=args.pointwise), indent=2, sort_keys=True))
+        print(json.dumps(run_verified(args.checkpoint, args.manifest, args.executable, args.tokens, args.output, args.cache_mib, args.timeout, args.generate, args.eos, binding_files=args.bind_file, route_probe=args.route_probe, rope_frequency=args.rope_frequency, rms_mode=args.rms_mode, matmul=args.matmul, pointwise=args.pointwise, lm_head_residency=args.lm_head_residency), indent=2, sort_keys=True))
     except (OSError, ValueError, VerificationError) as exc:
         parser.error(str(exc))
     return 0
