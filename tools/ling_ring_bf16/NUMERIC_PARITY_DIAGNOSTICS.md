@@ -1,3 +1,41 @@
+# Numeric parity diagnostics
+
+Status: bounded numeric qualification only.
+
+The Release parity admission is passed with exact route and top-1 checks as recorded below.
+
+## Provenance
+
+- Pilot implementation identity: `93eee22f118fe0085869f257dbbff2a56fe70a5a`.
+- Release build source head: `b399029efac8070e4be0166d0a8969485ae256f5`; build record reports dirty source files.
+- These identities are retained separately; the build record is not rewritten to the pilot commit.
+
+## Release binaries
+
+- ring: `8ed46dfcb4c6e4eb913b892a868f8903ae2b9347e816e12a850a47b62b607137` (/work/AI/experiments/strata-release-qualification-20261019-r1/ring-build/strata_ring_bf16)
+- ling: `048b9b59e4eb64270015f77708ad64e3b8653260a40e09dfac5587269da2c837` (/work/AI/experiments/strata-release-qualification-20261019-r1/ling-build/strata_ling_bf16)
+
+## Parity gates
+
+- ring_1031: passed; receipt SHA-256 `50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b`; route mismatches `0`; exact top-1 `True`.
+- ling_195: passed; receipt SHA-256 `1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787`; route mismatches `0`; exact top-1 `True`.
+- ling_358: passed; receipt SHA-256 `78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08`; route mismatches `0`; exact top-1 `True`.
+- fresh_ring_c02: passed; receipt SHA-256 `1787afbdd411b98cdf08cf3ec7e39045b1717132af9dba95376679d5984b323d`; route mismatches `0`; exact top-1 `True`.
+- fresh_ling_a01: passed; receipt SHA-256 `8192920fdf527569d814d353771ef64e1227ec6665a33e9d19471c12c71cf596`; route mismatches `0`; exact top-1 `True`.
+
+## Fresh held-out interpretation
+
+- Ring: 5 correct/10; 4 timeouts; 2.816021886473314 correct verified/hour.
+- Ling: 1 correct/10; 0 timeouts; 4.304160587483729 correct verified/hour.
+- Ring allows native reasoning up to 2048 total generated tokens; Ling uses thinking-off with 256 total generated tokens. These are different policy scopes and are not a speedup comparison.
+- Independent audit records C02 as a substantive semantic failure; C01/C02 also have an explicit marker-spacing ambiguity that must not be posthoc scored as a model error.
+Fresh quality remains bounded to the completed campaign receipts. Any timeout, length termination, invalid receipt, or missing completion remains a negative outcome and does not earn correctness.
+The campaign does not establish broad model ranking, training benefit, production readiness, or isolated prefill/decode throughput.
+
+No quantization, weight modification, or Mac inference is included.
+
+## Historical diagnostics preserved
+
 # Ring and Ling numerical parity, 2026-10-16
 
 AI Identity Incorported <james@aiii.id>

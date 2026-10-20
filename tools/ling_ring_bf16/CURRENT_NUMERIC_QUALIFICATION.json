@@ -1,265 +1,577 @@
 {
   "all_objectives_complete": false,
   "attribution": "AI Identity Incorported <james@aiii.id>",
-  "branch": "ling-ring-bf16",
   "checkpoint_weights_modified": false,
-  "date_utc": "2026-10-19",
   "defaults_changed": false,
-  "device": "dev8 NVIDIA RTX 4070 Ti sm_89",
-  "final_source_readmission": {
-    "path": "/work/AI/experiments/ring-final-source-readmission-20261016-r1/FINAL_SOURCE_READMISSION.json",
-    "sha256": "74611230ad9c6ebb15acd07c49a929a1e9c4770529f276ed0caf961a6420eba4",
-    "size": 2248
-  },
-  "fresh_heldout_quality": {
-    "cases_per_model": 10,
-    "cpu_tests_passed": 11,
-    "normalization_controls": "two valid, eight invalid, and overwrite rejection",
-    "root": "/work/AI/experiments/strata-fresh-heldout-20261019-r1",
-    "status": "prepared_not_run"
-  },
-  "gates": {
-    "hidden_logits": "abs(candidate-reference) <= 0.001 + 0.001 * abs(reference)",
-    "ordered_route_ids": "exact",
-    "route_weights": "abs(candidate-reference) <= 1e-5 + 1e-4 * abs(reference)",
-    "tolerances_changed": false,
-    "top1": "exact"
-  },
-  "ling": {
-    "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
-    "default_control_20261019": {
-      "binary_trace_exact": true,
-      "command": [
-        "/work/AI/experiments/ling-strata-20261016/reference-env/bin/python",
-        "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ling_verified.py",
-        "--checkpoint",
-        "/work/AI/checkpoints/Ling-3.0-tiny",
-        "--manifest",
-        "/work/AI/experiments/ling-strata-20261016/admission/manifest.tsv",
-        "--executable",
-        "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ling_bf16",
-        "--tokens",
-        "156890,128,256,1024",
-        "--output",
-        "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-default4",
-        "--cache-mib",
-        "1024",
-        "--timeout",
-        "120"
-      ],
-      "files": {
-        "final-hidden.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "8df60c907a4c6ce5f0fceecbdc59cff3dc263cea451dcf6a150ef0ed9609ef1b"
+  "fresh_heldout": {
+    "campaign_return_path": "/work/AI/experiments/strata-fresh-heldout-20261019-r1/CAMPAIGN-RETURN.json",
+    "campaign_return_sha256": "46ab9ef0fc3a583faf116933c7a6c406cf1b87fad6a9dda280b764e2461ea11c",
+    "limitations": [
+      "Activation comparisons are tolerance-level; ordered routes and top-1 are exact.",
+      "No original-framework quality or speed arm was run.",
+      "This tiny synthetic pilot is not broad quality gain or production-readiness evidence.",
+      "No quantization, weight modification, or Mac action is evidenced.",
+      "The frontends require logits_mode=all and emit layer, route, and logit traces for every processed token; native wall is instrumented Strata execution, not serving or isolated decode-throughput measurement. Prefill/decode phase times are unavailable.",
+      "The early and late shared-host environment snapshots show materially different CPU and I/O contention, including high /proc/pressure/io. Whole-campaign rate is an observed-workload measure only, not isolated-hardware speed or a causal model-efficiency ranking. The observations do not attribute a particular slowdown to any process.",
+      "A historical 31 GiB /dev/shm Ring stage had no references and was untouched during the pilot."
+    ],
+    "models": {
+      "ling": {
+        "correct_out_of_10": 1,
+        "correct_verified_per_hour": 4.304160587483729,
+        "elapsed_seconds_including_failed_work": 836.4000196620473,
+        "grade_status_breakdown": {
+          "pass": 1,
+          "wrong": 9
         },
-        "layer-0.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "d6b30d41fc17ae5c60d0f160dccbeffbbf5f05dc975aff539fbdf5de129bdba0"
-        },
-        "layer-1.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "50f5a42dcc712ab722771a7795ba3301e95ce01c4f72e53a3d8da49ddcc6d3ff"
-        },
-        "layer-10.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "3855a62d6a5d31bb41c4a440fe10a8c74bc200231f461059f405b63b9484acdd"
-        },
-        "layer-11.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "4c4408e0fa94c04902d9dcbe0c78097cb86571cd12b0644baaa76f2c318ab090"
-        },
-        "layer-12.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "df47e1968ad701c81fc4539c1b19f1c05881e58d48bb4f6e8dc671ef1036354f"
-        },
-        "layer-13.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "2877d97eabbf37e0bf8edc5ea6eeb24321604f8a030163f4f033d01c81e0bdf0"
-        },
-        "layer-14.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "d4e053451af6249893a3b86be1bba7226d26b33ef7a8919b3c4c98c74b2f1d96"
-        },
-        "layer-15.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "a254af26c02d77fc6e4724259e783f62330d67508394cc5bbe43f1c8296f8388"
-        },
-        "layer-16.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "b24c64c504cf6b6a6fd0b3cf632b35cf74ad274b56b8fe4eb13e1b096dd33e1e"
-        },
-        "layer-17.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "24838beec8ca662d68479abdbde162d1807ec19eb1e51dc049988e8b79bad917"
-        },
-        "layer-18.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "93fea2a353a6595479594469541635118b94c74935ea6a84a1c12e834c388958"
-        },
-        "layer-19.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "c361e3fbdb97e77c391f33e355859518ae9594b4fcdd7def168cf2d17723f0d9"
-        },
-        "layer-2.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "b239d0e5ffd1a18554a1bc66f241ccb2907bb51d7228d889bb9cb2f2eacf92c9"
-        },
-        "layer-20.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "f1736365c823fe7482db5ae8353c26637a694eac9f12f90478ebe998f57f9738"
-        },
-        "layer-21.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "6813ff1d0fa683eb91d701fa0d706d1e1d91f7b836240eca58f04fa0c8cf863d"
-        },
-        "layer-22.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "136b9a0ba10147995caf2e76c07f5c6098451d5cc3517e7577cab68f0863ceb8"
-        },
-        "layer-23.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "18c8eb48c1c5ec74472c21c826989f8cf2b4baffd56840b483dcf9fe30375fc1"
-        },
-        "layer-3.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "76d99091652a46952859ba9a1300a33c44d3499d4c42331d76cb993fb06b256f"
-        },
-        "layer-4.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "552a73572a6f4fd8dba370fdc6e8323876c8c92a3fbf3a083aef50c6f1b69832"
-        },
-        "layer-5.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "92ff3550a26adc54c13c35b2f842f6c50084a0c32e739399820ff1bb11f6ee78"
-        },
-        "layer-6.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "a457a300757769a145aba18ec76141b5b8e2c77729a2e43cc242917333562aa0"
-        },
-        "layer-7.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "ae7fd53ba388554aa02560fc114865c45bf163860877e6720e642fcebd09823b"
-        },
-        "layer-8.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "1b9a162eb790ea2f60075780dcef3da15ab17ec72e309e8c70d27cc80d78bf58"
-        },
-        "layer-9.f32": {
-          "actual_bytes": 24576,
-          "exact": true,
-          "expected_bytes": 24576,
-          "sha256": "e3d199ca70ff0366e19d6d8392bcbf09f4ada8adcbc99db41448ce64f52712fb"
-        },
-        "logits.f32": {
-          "actual_bytes": 2514944,
-          "exact": true,
-          "expected_bytes": 2514944,
-          "sha256": "eed23a5c443effbbd914f882b97260aba0ae78cd16224d588e0301d591b46c98"
-        },
-        "routes.tsv": {
-          "exact": true,
-          "sha256": "8037ef089824b1732435cabadee5f279526f7e958ed78ffef78e5136d68091fb"
-        }
+        "invalid_or_unverified": 0,
+        "native_completed_outer_verification_incomplete": 0,
+        "native_length_terminations": 0,
+        "native_wall_and_counters": [
+          {
+            "cache_evictions": 9346,
+            "cache_hits": 6619,
+            "cache_misses": 9573,
+            "case_id": "A01",
+            "decode_seconds": null,
+            "generated_token_count": 8,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 66.243398236,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 81,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 8784,
+            "cache_hits": 5525,
+            "cache_misses": 9011,
+            "case_id": "A02",
+            "decode_seconds": null,
+            "generated_token_count": 7,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 28.684153442,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 73,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 11045,
+            "cache_hits": 6760,
+            "cache_misses": 11272,
+            "case_id": "C01",
+            "decode_seconds": null,
+            "generated_token_count": 13,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 35.691956372,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 86,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 11480,
+            "cache_hits": 6141,
+            "cache_misses": 11707,
+            "case_id": "C02",
+            "decode_seconds": null,
+            "generated_token_count": 16,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 33.404951049,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 82,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 13689,
+            "cache_hits": 7796,
+            "cache_misses": 13916,
+            "case_id": "F01",
+            "decode_seconds": null,
+            "generated_token_count": 26,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 38.593165595,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 93,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 9824,
+            "cache_hits": 6509,
+            "cache_misses": 10051,
+            "case_id": "F02",
+            "decode_seconds": null,
+            "generated_token_count": 14,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 28.945453968,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 77,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 18787,
+            "cache_hits": 11714,
+            "cache_misses": 19014,
+            "case_id": "P01",
+            "decode_seconds": null,
+            "generated_token_count": 71,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 54.730841716,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 97,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 12100,
+            "cache_hits": 7913,
+            "cache_misses": 12327,
+            "case_id": "P02",
+            "decode_seconds": null,
+            "generated_token_count": 24,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 35.194539043,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 87,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 12652,
+            "cache_hits": 6625,
+            "cache_misses": 12879,
+            "case_id": "S01",
+            "decode_seconds": null,
+            "generated_token_count": 16,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 42.546059964,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 91,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 11510,
+            "cache_hits": 5559,
+            "cache_misses": 11737,
+            "case_id": "T01",
+            "decode_seconds": null,
+            "generated_token_count": 7,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 40.943295809,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 88,
+            "receipt": "provenance"
+          }
+        ],
+        "timeouts": 0,
+        "verified_completions": 10
       },
-      "full_wall_seconds": 23.38026250799885,
-      "returncode": 0,
-      "tokens": [
-        156890,
-        128,
-        256,
-        1024
-      ]
+      "ring": {
+        "correct_out_of_10": 5,
+        "correct_verified_per_hour": 2.816021886473314,
+        "elapsed_seconds_including_failed_work": 6391.9957747709705,
+        "grade_status_breakdown": {
+          "invalid_output": 1,
+          "missing": 4,
+          "pass": 5
+        },
+        "invalid_or_unverified": 1,
+        "native_completed_outer_verification_incomplete": 1,
+        "native_length_terminations": 1,
+        "native_wall_and_counters": [
+          {
+            "case_id": "A01",
+            "receipt": "unverified"
+          },
+          {
+            "cache_evictions": 226585,
+            "cache_hits": 94269,
+            "cache_misses": 226755,
+            "case_id": "A02",
+            "decode_seconds": null,
+            "generated_token_count": 2048,
+            "native_execution_completed": true,
+            "native_finish_reason": "length",
+            "native_length_terminated": true,
+            "native_wall_seconds": 767.412655981,
+            "outer_runner_timed_out": true,
+            "prefill_seconds": null,
+            "prompt_token_count": null,
+            "receipt": "execution_unverified"
+          },
+          {
+            "cache_evictions": 146398,
+            "cache_hits": 63496,
+            "cache_misses": 146568,
+            "case_id": "C01",
+            "decode_seconds": null,
+            "generated_token_count": 1305,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 440.256230062,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 78,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 202016,
+            "cache_hits": 99230,
+            "cache_misses": 202186,
+            "case_id": "C02",
+            "decode_seconds": null,
+            "generated_token_count": 1910,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 643.739664883,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 74,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 64157,
+            "cache_hits": 32953,
+            "cache_misses": 64327,
+            "case_id": "F01",
+            "decode_seconds": null,
+            "generated_token_count": 556,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 201.242057476,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 85,
+            "receipt": "provenance"
+          },
+          {
+            "case_id": "F02",
+            "receipt": "unverified"
+          },
+          {
+            "case_id": "P01",
+            "receipt": "unverified"
+          },
+          {
+            "cache_evictions": 167617,
+            "cache_hits": 93957,
+            "cache_misses": 167787,
+            "case_id": "P02",
+            "decode_seconds": null,
+            "generated_token_count": 1644,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 591.967550927,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 79,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 144574,
+            "cache_hits": 59240,
+            "cache_misses": 144744,
+            "case_id": "S01",
+            "decode_seconds": null,
+            "generated_token_count": 1260,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 454.293687934,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 83,
+            "receipt": "provenance"
+          },
+          {
+            "cache_evictions": 39372,
+            "cache_hits": 15482,
+            "cache_misses": 39542,
+            "case_id": "T01",
+            "decode_seconds": null,
+            "generated_token_count": 283,
+            "native_execution_completed": true,
+            "native_finish_reason": "eos",
+            "native_length_terminated": false,
+            "native_wall_seconds": 118.921809306,
+            "outer_runner_timed_out": false,
+            "prefill_seconds": null,
+            "prompt_token_count": 80,
+            "receipt": "provenance"
+          }
+        ],
+        "timeouts": 4,
+        "verified_completions": 5
+      }
     },
-    "default_control_trace_files_bitwise": 27,
-    "fresh_195_trace": {
-      "max_errors": {
-        "final_hidden_max_abs": 2.8967857360839844e-05,
-        "hidden_layers_max_abs": 0.0001983642578125,
-        "logits_max_abs": 6.401538848876953e-05,
-        "route_weight_max_abs": 6.3773415069356965e-06
+    "policy": {
+      "case_timeout_seconds": 900,
+      "cold_launch_verification_and_ambient_io_in_elapsed": true,
+      "ling_max_tokens": 256,
+      "ling_thinking": "off",
+      "ring_reasoning_max_tokens": 2048,
+      "same_questions": true
+    },
+    "profiles_sha256": "d64f52692b2eab2fecac78ac18928c14b3e386ae1a9691ffd424d85939dbe146",
+    "quality_gate": "completed; both policies failed declared gate",
+    "result_path": "/work/AI/experiments/strata-fresh-heldout-20261019-r1/results/RESULT.json",
+    "result_sha256": "06181b11c669310c6c5ed02b6cdeb9b60a504f3cfc9e3a73e53d56fd4842e2d0",
+    "review_path": "/work/AI/experiments/strata-fresh-heldout-20261019-r1/FINAL-REVIEW.json",
+    "review_sha256": "c7d6893df26c9cf3bc3ccaec7994fa9c734c6ee5e5733b6bb775fba4db45a691"
+  },
+  "fresh_reference_overall": "passed",
+  "historical_previous_qualification": {
+    "all_objectives_complete": false,
+    "attribution": "AI Identity Incorported <james@aiii.id>",
+    "branch": "ling-ring-bf16",
+    "checkpoint_weights_modified": false,
+    "date_utc": "2026-10-19",
+    "defaults_changed": false,
+    "device": "dev8 NVIDIA RTX 4070 Ti sm_89",
+    "final_source_readmission": {
+      "path": "/work/AI/experiments/ring-final-source-readmission-20261016-r1/FINAL_SOURCE_READMISSION.json",
+      "sha256": "74611230ad9c6ebb15acd07c49a929a1e9c4770529f276ed0caf961a6420eba4",
+      "size": 2248
+    },
+    "fresh_heldout_quality": {
+      "cases_per_model": 10,
+      "cpu_tests_passed": 11,
+      "normalization_controls": "two valid, eight invalid, and overwrite rejection",
+      "root": "/work/AI/experiments/strata-fresh-heldout-20261019-r1",
+      "status": "prepared_not_run"
+    },
+    "gates": {
+      "hidden_logits": "abs(candidate-reference) <= 0.001 + 0.001 * abs(reference)",
+      "ordered_route_ids": "exact",
+      "route_weights": "abs(candidate-reference) <= 1e-5 + 1e-4 * abs(reference)",
+      "tolerances_changed": false,
+      "top1": "exact"
+    },
+    "ling": {
+      "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
+      "default_control_20261019": {
+        "binary_trace_exact": true,
+        "command": [
+          "/work/AI/experiments/ling-strata-20261016/reference-env/bin/python",
+          "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ling_verified.py",
+          "--checkpoint",
+          "/work/AI/checkpoints/Ling-3.0-tiny",
+          "--manifest",
+          "/work/AI/experiments/ling-strata-20261016/admission/manifest.tsv",
+          "--executable",
+          "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ling_bf16",
+          "--tokens",
+          "156890,128,256,1024",
+          "--output",
+          "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-default4",
+          "--cache-mib",
+          "1024",
+          "--timeout",
+          "120"
+        ],
+        "files": {
+          "final-hidden.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "8df60c907a4c6ce5f0fceecbdc59cff3dc263cea451dcf6a150ef0ed9609ef1b"
+          },
+          "layer-0.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "d6b30d41fc17ae5c60d0f160dccbeffbbf5f05dc975aff539fbdf5de129bdba0"
+          },
+          "layer-1.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "50f5a42dcc712ab722771a7795ba3301e95ce01c4f72e53a3d8da49ddcc6d3ff"
+          },
+          "layer-10.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "3855a62d6a5d31bb41c4a440fe10a8c74bc200231f461059f405b63b9484acdd"
+          },
+          "layer-11.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "4c4408e0fa94c04902d9dcbe0c78097cb86571cd12b0644baaa76f2c318ab090"
+          },
+          "layer-12.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "df47e1968ad701c81fc4539c1b19f1c05881e58d48bb4f6e8dc671ef1036354f"
+          },
+          "layer-13.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "2877d97eabbf37e0bf8edc5ea6eeb24321604f8a030163f4f033d01c81e0bdf0"
+          },
+          "layer-14.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "d4e053451af6249893a3b86be1bba7226d26b33ef7a8919b3c4c98c74b2f1d96"
+          },
+          "layer-15.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "a254af26c02d77fc6e4724259e783f62330d67508394cc5bbe43f1c8296f8388"
+          },
+          "layer-16.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "b24c64c504cf6b6a6fd0b3cf632b35cf74ad274b56b8fe4eb13e1b096dd33e1e"
+          },
+          "layer-17.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "24838beec8ca662d68479abdbde162d1807ec19eb1e51dc049988e8b79bad917"
+          },
+          "layer-18.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "93fea2a353a6595479594469541635118b94c74935ea6a84a1c12e834c388958"
+          },
+          "layer-19.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "c361e3fbdb97e77c391f33e355859518ae9594b4fcdd7def168cf2d17723f0d9"
+          },
+          "layer-2.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "b239d0e5ffd1a18554a1bc66f241ccb2907bb51d7228d889bb9cb2f2eacf92c9"
+          },
+          "layer-20.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "f1736365c823fe7482db5ae8353c26637a694eac9f12f90478ebe998f57f9738"
+          },
+          "layer-21.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "6813ff1d0fa683eb91d701fa0d706d1e1d91f7b836240eca58f04fa0c8cf863d"
+          },
+          "layer-22.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "136b9a0ba10147995caf2e76c07f5c6098451d5cc3517e7577cab68f0863ceb8"
+          },
+          "layer-23.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "18c8eb48c1c5ec74472c21c826989f8cf2b4baffd56840b483dcf9fe30375fc1"
+          },
+          "layer-3.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "76d99091652a46952859ba9a1300a33c44d3499d4c42331d76cb993fb06b256f"
+          },
+          "layer-4.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "552a73572a6f4fd8dba370fdc6e8323876c8c92a3fbf3a083aef50c6f1b69832"
+          },
+          "layer-5.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "92ff3550a26adc54c13c35b2f842f6c50084a0c32e739399820ff1bb11f6ee78"
+          },
+          "layer-6.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "a457a300757769a145aba18ec76141b5b8e2c77729a2e43cc242917333562aa0"
+          },
+          "layer-7.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "ae7fd53ba388554aa02560fc114865c45bf163860877e6720e642fcebd09823b"
+          },
+          "layer-8.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "1b9a162eb790ea2f60075780dcef3da15ab17ec72e309e8c70d27cc80d78bf58"
+          },
+          "layer-9.f32": {
+            "actual_bytes": 24576,
+            "exact": true,
+            "expected_bytes": 24576,
+            "sha256": "e3d199ca70ff0366e19d6d8392bcbf09f4ada8adcbc99db41448ce64f52712fb"
+          },
+          "logits.f32": {
+            "actual_bytes": 2514944,
+            "exact": true,
+            "expected_bytes": 2514944,
+            "sha256": "eed23a5c443effbbd914f882b97260aba0ae78cd16224d588e0301d591b46c98"
+          },
+          "routes.tsv": {
+            "exact": true,
+            "sha256": "8037ef089824b1732435cabadee5f279526f7e958ed78ffef78e5136d68091fb"
+          }
+        },
+        "full_wall_seconds": 23.38026250799885,
+        "returncode": 0,
+        "tokens": [
+          156890,
+          128,
+          256,
+          1024
+        ]
       },
-      "ordered_mismatches": 0,
-      "ordered_routes": 4485,
-      "result": {
-        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
-        "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
-        "size": 569
-      },
-      "strict_pass": true,
-      "tokens": 195,
-      "top1_exact": true
-    },
-    "generation_controls": {
-      "scope": "development controls, including one stopping control",
-      "strict_passed": 6,
-      "strict_total": 7
-    },
-    "historical_pre_20261019_profile": {
-      "matmul": "fp32-cublas",
-      "rms_mode": "torch-cuda-order"
-    },
-    "inventory": {
-      "path": "/work/AI/experiments/ling-parity-summary-20261016.json",
-      "sha256": "2594c1d730ba70158cddfc447b74606fc179805be9a36fbc865395b643282a46",
-      "size": 13235
-    },
-    "negative_reproduction_native_trace_files_bitwise": 27,
-    "original_358_trace": {
-      "ordered_mismatches": 0,
-      "ordered_routes": 8234,
-      "strict_pass": true,
-      "top1_exact": true
-    },
-    "qualified_cases_20261019": {
-      "ling-195": {
+      "default_control_trace_files_bitwise": 27,
+      "fresh_195_trace": {
         "max_errors": {
           "final_hidden_max_abs": 2.8967857360839844e-05,
           "hidden_layers_max_abs": 0.0001983642578125,
@@ -277,338 +589,576 @@
         "tokens": 195,
         "top1_exact": true
       },
-      "ling-358": {
+      "generation_controls": {
+        "scope": "development controls, including one stopping control",
+        "strict_passed": 6,
+        "strict_total": 7
+      },
+      "historical_pre_20261019_profile": {
+        "matmul": "fp32-cublas",
+        "rms_mode": "torch-cuda-order"
+      },
+      "inventory": {
+        "path": "/work/AI/experiments/ling-parity-summary-20261016.json",
+        "sha256": "2594c1d730ba70158cddfc447b74606fc179805be9a36fbc865395b643282a46",
+        "size": 13235
+      },
+      "negative_reproduction_native_trace_files_bitwise": 27,
+      "original_358_trace": {
+        "ordered_mismatches": 0,
+        "ordered_routes": 8234,
+        "strict_pass": true,
+        "top1_exact": true
+      },
+      "qualified_cases_20261019": {
+        "ling-195": {
+          "max_errors": {
+            "final_hidden_max_abs": 2.8967857360839844e-05,
+            "hidden_layers_max_abs": 0.0001983642578125,
+            "logits_max_abs": 6.401538848876953e-05,
+            "route_weight_max_abs": 6.3773415069356965e-06
+          },
+          "ordered_mismatches": 0,
+          "ordered_routes": 4485,
+          "result": {
+            "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
+            "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+            "size": 569
+          },
+          "strict_pass": true,
+          "tokens": 195,
+          "top1_exact": true
+        },
+        "ling-358": {
+          "max_errors": {
+            "final_hidden_max_abs": 1.1682510375976562e-05,
+            "hidden_layers_max_abs": 0.00011444091796875,
+            "logits_max_abs": 3.0040740966796875e-05,
+            "route_weight_max_abs": 2.503205993598101e-06
+          },
+          "ordered_mismatches": 0,
+          "ordered_routes": 8234,
+          "result": {
+            "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
+            "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
+            "size": 570
+          },
+          "strict_pass": true,
+          "tokens": 358,
+          "top1_exact": true
+        }
+      },
+      "qualified_operator_profile_20261019": {
+        "--matmul": "fp32-cublas",
+        "--pointwise": "torch-cuda",
+        "--rms-mode": "torch-cuda-order"
+      },
+      "status": "bounded_strict_parity_passed"
+    },
+    "next_discriminator": "Qualify optimized Release artifacts against the same retained gates, then execute the CPU-qualified fresh ten-case-per-model quality and efficiency protocol.",
+    "promotion": false,
+    "quantized": false,
+    "repository": "/work/AI/src/strata-ling-ring-bf16",
+    "ring": {
+      "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
+      "cuda_rms_1031_and_source_ordered_1031": "not_run_after_short_gate_failure",
+      "cuda_rms_173": {
+        "ordered_mismatches": 1,
+        "strict_pass": false
+      },
+      "cuda_router_1031": {
+        "ordered_mismatches": 0,
+        "ordered_routes": 19589,
+        "strict_pass": false,
+        "top1_exact": true
+      },
+      "default_control_20261019": {
+        "binary_trace_exact": true,
+        "command": [
+          "/work/AI/experiments/ring-strata-20261016/cuda-reference-env/bin/python",
+          "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ring_verified.py",
+          "--checkpoint",
+          "/work/AI/checkpoints/Ring-mini-2.0",
+          "--manifest",
+          "/work/AI/experiments/ring-strata-20261016/admission/manifest.tsv",
+          "--executable",
+          "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ring_bf16",
+          "--tokens",
+          "157151,39,116171,157152",
+          "--output",
+          "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-default4",
+          "--cache-mib",
+          "1024",
+          "--timeout",
+          "120"
+        ],
+        "files": {
+          "final-hidden.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "d6c909c87078e917948e53a67b31304760c08f9ea65023d7eeb3126e9abb0629"
+          },
+          "layer-0.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "cd2f61cd03db796c2c7c95fdfe62a04de0616d6622995e57714eafe32d604cc6"
+          },
+          "layer-1.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "4a0a448bc5fde3e4bf520c5596bb079681114ffc640ee2efd8a0ca69b70aad07"
+          },
+          "layer-10.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "9b7dbef3f038be00f13e660966135cca8c3f23acc3195449a47b123a62acdb0d"
+          },
+          "layer-11.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "76bf8dbcfd5a8e230851d962aaf7007483723ec8782cce03eee1dc36d799a9ac"
+          },
+          "layer-12.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "a42edc974d5a3cc67f9a3234059757178a46f40024f36e180b3bb902d7dd59bc"
+          },
+          "layer-13.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "1e9ef0d5f7908b2687e7f0173f458c1eeebc341d37d1ca3c49961b61a9d9e6cb"
+          },
+          "layer-14.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "27bf6eda7ef962374eee460663e7e8da8eef1ee9cab935070b7ebb0b38068937"
+          },
+          "layer-15.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "9a3fda819d33ee544dfc60b66ee14cd6d7f9a5155571a743d22f985eb1c837a1"
+          },
+          "layer-16.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "bef01336bc19ce72e2ec1dd033b3739a584d36b21af6c5789267949ce930deec"
+          },
+          "layer-17.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "8f059e41f7def7e351bf0806c21f3c877bffb64ffb60267013ee1efcb9f1669b"
+          },
+          "layer-18.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "1e20801ba7191b4892a2be43ca06bf12841a852ff10d1022b37a34c6188dcd89"
+          },
+          "layer-19.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "1ae71770e3396264b8a943855100574c2416da7c1b180e02c4064a3bc73edc23"
+          },
+          "layer-2.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "089b81923057696a4b69329995ad49bac5baa20d141c54985d93fc66e975cc6f"
+          },
+          "layer-3.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "590670cf8343104233c65f64ea54c15476f7169a15ba7f071a5291378fd2715b"
+          },
+          "layer-4.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "2b134833ff7874c7222bc37c1d936447bf00faa60a3635fb4c5bb1fc416cdfd8"
+          },
+          "layer-5.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "70eb9400265c669765a57a814155b125636e82f35b2a2af04b925063f84b5e7f"
+          },
+          "layer-6.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "1e44d443302e55b345ae9f693e47931074cc58ddfcbb3bb885792ad92a552d51"
+          },
+          "layer-7.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "a111b000328297780da6d919555c0ca38b1f395b592c96e3c7a448843bb0a038"
+          },
+          "layer-8.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "bdbb25ce4c259d68bababd3de30f11b921578ae5a72efd5d17f8f03f93301c3f"
+          },
+          "layer-9.f32": {
+            "actual_bytes": 32768,
+            "exact": true,
+            "expected_bytes": 32768,
+            "sha256": "f20b5f0a07f6f5bdecb8e679377651747327b017b7941ea4c796364524976b04"
+          },
+          "logits.f32": {
+            "actual_bytes": 2514944,
+            "exact": true,
+            "expected_bytes": 2514944,
+            "sha256": "7e1f4b562ff32ae47876e70779f40b04ac26db97cf25d09ff3c27f4c1fcd72ee"
+          },
+          "routes.tsv": {
+            "exact": true,
+            "sha256": "3ba41a20d91178536f0ae3197839b12e8160dac7318965e3c5b6640a951b3bdc"
+          }
+        },
+        "full_wall_seconds": 117.91802036203444,
+        "returncode": 0,
+        "tokens": [
+          157151,
+          39,
+          116171,
+          157152
+        ]
+      },
+      "default_control_trace_files_bitwise": 23,
+      "frequency_only_failed_positions": [
+        1031
+      ],
+      "frequency_only_passed_positions": [
+        173,
+        375,
+        519
+      ],
+      "inventory": {
+        "path": "/work/AI/experiments/ring-parity-summary-20261016.json",
+        "sha256": "87b874338954de956d1470a7140f61f849cd81660b2dcd5c4bdf7169fa4dc146",
+        "size": 19381
+      },
+      "isolated_repair": "FP32 RoPE inverse-frequency metadata index2",
+      "qualified_cases_20261019": {
+        "ring-1031": {
+          "max_errors": {
+            "final_hidden_max_abs": 0.000698089599609375,
+            "hidden_layers_max_abs": 0.0118408203125,
+            "logits_max_abs": 0.000308990478515625,
+            "route_weight_max_abs": 4.684856506353974e-05
+          },
+          "ordered_mismatches": 0,
+          "ordered_routes": 19589,
+          "result": {
+            "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
+            "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
+            "size": 649
+          },
+          "strict_pass": true,
+          "tokens": 1031,
+          "top1_exact": true
+        }
+      },
+      "qualified_operator_profile_20261019": {
+        "--attention-backend": "torch-cuda",
+        "--matmul": "fp32-cublas",
+        "--pointwise": "torch-cuda",
+        "--rms-mode": "torch-cuda",
+        "--rope-frequency": "original",
+        "--router": "torch-cuda"
+      },
+      "source_ordered_fp32_173": {
+        "ordered_mismatches": 0,
+        "strict_pass": false,
+        "top1_exact": true
+      },
+      "status": "bounded_strict_parity_passed"
+    },
+    "schema": "strata-ling-ring-numeric-qualification-v1",
+    "scope": "Bounded original-cached CUDA parity and four-position default preservation only. Fresh quality, efficiency, training, and production admission remain distinct gates.",
+    "selected_evidence": [
+      {
+        "path": "/work/AI/experiments/ring-torch-qualification-20261016-r2/1031-bf16-gemv/RESULT.json",
+        "sha256": "3ad6d7e08fc4ec3c5ecc3bf81254c51928bc725c5b148d4b5ccd941dd02e9561",
+        "size": 1309
+      },
+      {
+        "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/default173-bf16-gemv/RESULT.json",
+        "sha256": "2576a9b9db5c363f38f18d6a466f57a950477a91daf9e42b30a8603ec4bd5e09",
+        "size": 1083
+      },
+      {
+        "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/173-bf16-gemv/RESULT.json",
+        "sha256": "ad5a2cfc51e7da3eee3c8ea96429fbfc0474f0292b29fc959ffd8ecc5c27a0a2",
+        "size": 1694
+      },
+      {
+        "path": "/work/AI/experiments/ring-matched-source-qualification-20261016-r1/173-fp32-cublas/RESULT.json",
+        "sha256": "90adb42e1615afdb28982c2f7d2b44cb14568594f928973463b154dea100aecc",
+        "size": 1416
+      },
+      {
+        "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/358/RESULT.json",
+        "sha256": "3275d282a954487993baf01b07340ae2a4a6f0a0d1d5c4c569a2e7ccb2d8656a",
+        "size": 1060
+      },
+      {
+        "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/195/RESULT.json",
+        "sha256": "c8864daca44f8eee685709db1a58aeb4f9a640167ef7eff22318acea152242d8",
+        "size": 5948
+      },
+      {
+        "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/gate-replay/result.json",
+        "sha256": "ca3239810f58cfaccd12519660ed4de4258980b8ac687410bc56eecde5aae446",
+        "size": 33013
+      },
+      {
+        "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/norm-replay-cuda.json",
+        "sha256": "3072ceb1f17e93f70770d6a6a2ab8c761a513cf54c6976daa530e331e3339a74",
+        "size": 22972
+      },
+      {
+        "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/kda-attention-replay-cuda.json",
+        "sha256": "4dba68a9c79e3120aea3dbd2f885c23de582dce1c76d112e60b997322a5675ea",
+        "size": 62805
+      },
+      {
+        "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/answer-control.json",
+        "sha256": "adbffa14ac2fc86aa1359338a1504d4f1dcb76f4819b4251a9b51373d706f64c",
+        "size": 6174
+      },
+      {
+        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
+        "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
+        "size": 649
+      },
+      {
+        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
+        "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+        "size": 569
+      },
+      {
+        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
+        "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
+        "size": 570
+      }
+    ],
+    "serving_interrupted": false,
+    "starting_commit": "b399029efac8070e4be0166d0a8969485ae256f5",
+    "status": "bounded_strict_parity_passed_release_and_fresh_quality_pending",
+    "tests": {
+      "ling_ctest_passed": 3,
+      "no_torch_build_and_cpu_rejection": {
+        "path": "/work/AI/experiments/ring-native-rms-guard-build/NO_TORCH_BUILD_RECEIPT.json",
+        "sha256": "07e080a827c2e6f2742f176ba9597e52ae68c4152a1439a3630d2cc24f438004",
+        "size": 3557
+      },
+      "python_log": {
+        "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/CPU-TESTS.log",
+        "sha256": "c0c45b6db4e1efe116b5322f7b239ed6ea9a94ab37c53adbb4541d46138614c4",
+        "size": 1565
+      },
+      "python_passed": 189,
+      "ring_ctest_passed": 7
+    }
+  },
+  "limitations": [
+    "Fresh quality is explicitly negative or incomplete unless every model has ten verified correct completions with valid terminal receipts.",
+    "No broad capability, training, production serving, or isolated-hardware throughput claim.",
+    "No quantization or weight modification was used.",
+    "No Mac inference or Mac runtime action is included.",
+    "Historical evidence remains historical and is not overwritten.",
+    "Prefill/decode phase timings are unavailable in this final review; native wall is instrumented execution and excludes wrapper verification; whole model-window rates include failed work and verification."
+  ],
+  "mac_runtime_actions": [],
+  "next_discriminator": "Profile copies/cache and qualify the prepared BF16 output-matrix residency candidate; qualify workload-specific reasoning plus verification on new tasks before promotion.",
+  "parity": {
+    "admission": {
+      "passed": true,
+      "path": "/work/AI/experiments/strata-fresh-heldout-20261019-r1/ADMISSION.json",
+      "sha256": "ca1dacc43d373324505c6f13460581a12d6a6a2653e1f8d8df007dc25dba70a2"
+    },
+    "comparator": {
+      "path": "/work/AI/experiments/strata-fresh-heldout-20261019-r1/COMBINED-PARITY.json",
+      "sha256": "a848a9af1e9fd3b93f322b04ecdfeb4e106ba000d8ec2e597f5e5ec225a17594"
+    },
+    "gates": {
+      "fresh_ling_a01": {
+        "max_errors": {
+          "final_hidden_max_abs": 2.849102020263672e-05,
+          "hidden_layers_max_abs": 0.00030517578125,
+          "logits_max_abs": 3.910064697265625e-05,
+          "route_weight_max_abs": 1.5521493530457064e-06
+        },
+        "passed": true,
+        "path": "/work/AI/experiments/strata-ling-A01-reference-preparation-20261019-r1/compare/result.json",
+        "route_count": 2024,
+        "route_mismatch_count": 0,
+        "sha256": "8192920fdf527569d814d353771ef64e1227ec6665a33e9d19471c12c71cf596",
+        "tokens": 88,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true
+      },
+      "fresh_ring_c02": {
+        "max_errors": {
+          "final_hidden_max_abs": 0.000179290771484375,
+          "hidden_layers_max_abs": 0.00091552734375,
+          "logits_max_abs": 6.437301635742188e-05,
+          "route_weight_max_abs": 5.065910919199723e-06
+        },
+        "passed": true,
+        "path": "/work/AI/experiments/strata-ring-c02-original-reference-preparation-20261019-r1/compare/result.json",
+        "route_count": 37677,
+        "route_mismatch_count": 0,
+        "sha256": "1787afbdd411b98cdf08cf3ec7e39045b1717132af9dba95376679d5984b323d",
+        "tokens": 1983,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true
+      },
+      "ling_195": {
+        "max_errors": {
+          "final_hidden_max_abs": 2.8967857360839844e-05,
+          "hidden_layers_max_abs": 0.0001983642578125,
+          "logits_max_abs": 6.401538848876953e-05,
+          "route_weight_max_abs": 6.3773415069356965e-06
+        },
+        "passed": true,
+        "path": "/work/AI/experiments/strata-release-qualification-20261019-r1/ling-195/compare/result.json",
+        "route_count": 4485,
+        "route_mismatch_count": 0,
+        "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
+        "tokens": 195,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
+        "top1_exact": true
+      },
+      "ling_358": {
         "max_errors": {
           "final_hidden_max_abs": 1.1682510375976562e-05,
           "hidden_layers_max_abs": 0.00011444091796875,
           "logits_max_abs": 3.0040740966796875e-05,
           "route_weight_max_abs": 2.503205993598101e-06
         },
-        "ordered_mismatches": 0,
-        "ordered_routes": 8234,
-        "result": {
-          "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
-          "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
-          "size": 570
-        },
-        "strict_pass": true,
+        "passed": true,
+        "path": "/work/AI/experiments/strata-release-qualification-20261019-r1/ling-358/compare/result.json",
+        "route_count": 8234,
+        "route_mismatch_count": 0,
+        "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
         "tokens": 358,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
         "top1_exact": true
-      }
-    },
-    "qualified_operator_profile_20261019": {
-      "--matmul": "fp32-cublas",
-      "--pointwise": "torch-cuda",
-      "--rms-mode": "torch-cuda-order"
-    },
-    "status": "bounded_strict_parity_passed"
-  },
-  "next_discriminator": "Qualify optimized Release artifacts against the same retained gates, then execute the CPU-qualified fresh ten-case-per-model quality and efficiency protocol.",
-  "promotion": false,
-  "quantized": false,
-  "repository": "/work/AI/src/strata-ling-ring-bf16",
-  "ring": {
-    "build_note_20261019": "Current qualified artifacts have CMAKE_BUILD_TYPE unset; optimized Release qualification is separate and pending. No speedup is claimed from cross-date timings.",
-    "cuda_rms_1031_and_source_ordered_1031": "not_run_after_short_gate_failure",
-    "cuda_rms_173": {
-      "ordered_mismatches": 1,
-      "strict_pass": false
-    },
-    "cuda_router_1031": {
-      "ordered_mismatches": 0,
-      "ordered_routes": 19589,
-      "strict_pass": false,
-      "top1_exact": true
-    },
-    "default_control_20261019": {
-      "binary_trace_exact": true,
-      "command": [
-        "/work/AI/experiments/ring-strata-20261016/cuda-reference-env/bin/python",
-        "/work/AI/src/strata-ling-ring-bf16/tools/ling_ring_bf16/run_ring_verified.py",
-        "--checkpoint",
-        "/work/AI/checkpoints/Ring-mini-2.0",
-        "--manifest",
-        "/work/AI/experiments/ring-strata-20261016/admission/manifest.tsv",
-        "--executable",
-        "/work/AI/experiments/strata-parity-repair-20261019-r1/bin/strata_ring_bf16",
-        "--tokens",
-        "157151,39,116171,157152",
-        "--output",
-        "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-default4",
-        "--cache-mib",
-        "1024",
-        "--timeout",
-        "120"
-      ],
-      "files": {
-        "final-hidden.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "d6c909c87078e917948e53a67b31304760c08f9ea65023d7eeb3126e9abb0629"
-        },
-        "layer-0.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "cd2f61cd03db796c2c7c95fdfe62a04de0616d6622995e57714eafe32d604cc6"
-        },
-        "layer-1.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "4a0a448bc5fde3e4bf520c5596bb079681114ffc640ee2efd8a0ca69b70aad07"
-        },
-        "layer-10.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "9b7dbef3f038be00f13e660966135cca8c3f23acc3195449a47b123a62acdb0d"
-        },
-        "layer-11.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "76bf8dbcfd5a8e230851d962aaf7007483723ec8782cce03eee1dc36d799a9ac"
-        },
-        "layer-12.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "a42edc974d5a3cc67f9a3234059757178a46f40024f36e180b3bb902d7dd59bc"
-        },
-        "layer-13.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "1e9ef0d5f7908b2687e7f0173f458c1eeebc341d37d1ca3c49961b61a9d9e6cb"
-        },
-        "layer-14.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "27bf6eda7ef962374eee460663e7e8da8eef1ee9cab935070b7ebb0b38068937"
-        },
-        "layer-15.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "9a3fda819d33ee544dfc60b66ee14cd6d7f9a5155571a743d22f985eb1c837a1"
-        },
-        "layer-16.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "bef01336bc19ce72e2ec1dd033b3739a584d36b21af6c5789267949ce930deec"
-        },
-        "layer-17.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "8f059e41f7def7e351bf0806c21f3c877bffb64ffb60267013ee1efcb9f1669b"
-        },
-        "layer-18.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "1e20801ba7191b4892a2be43ca06bf12841a852ff10d1022b37a34c6188dcd89"
-        },
-        "layer-19.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "1ae71770e3396264b8a943855100574c2416da7c1b180e02c4064a3bc73edc23"
-        },
-        "layer-2.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "089b81923057696a4b69329995ad49bac5baa20d141c54985d93fc66e975cc6f"
-        },
-        "layer-3.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "590670cf8343104233c65f64ea54c15476f7169a15ba7f071a5291378fd2715b"
-        },
-        "layer-4.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "2b134833ff7874c7222bc37c1d936447bf00faa60a3635fb4c5bb1fc416cdfd8"
-        },
-        "layer-5.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "70eb9400265c669765a57a814155b125636e82f35b2a2af04b925063f84b5e7f"
-        },
-        "layer-6.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "1e44d443302e55b345ae9f693e47931074cc58ddfcbb3bb885792ad92a552d51"
-        },
-        "layer-7.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "a111b000328297780da6d919555c0ca38b1f395b592c96e3c7a448843bb0a038"
-        },
-        "layer-8.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "bdbb25ce4c259d68bababd3de30f11b921578ae5a72efd5d17f8f03f93301c3f"
-        },
-        "layer-9.f32": {
-          "actual_bytes": 32768,
-          "exact": true,
-          "expected_bytes": 32768,
-          "sha256": "f20b5f0a07f6f5bdecb8e679377651747327b017b7941ea4c796364524976b04"
-        },
-        "logits.f32": {
-          "actual_bytes": 2514944,
-          "exact": true,
-          "expected_bytes": 2514944,
-          "sha256": "7e1f4b562ff32ae47876e70779f40b04ac26db97cf25d09ff3c27f4c1fcd72ee"
-        },
-        "routes.tsv": {
-          "exact": true,
-          "sha256": "3ba41a20d91178536f0ae3197839b12e8160dac7318965e3c5b6640a951b3bdc"
-        }
       },
-      "full_wall_seconds": 117.91802036203444,
-      "returncode": 0,
-      "tokens": [
-        157151,
-        39,
-        116171,
-        157152
-      ]
-    },
-    "default_control_trace_files_bitwise": 23,
-    "frequency_only_failed_positions": [
-      1031
-    ],
-    "frequency_only_passed_positions": [
-      173,
-      375,
-      519
-    ],
-    "inventory": {
-      "path": "/work/AI/experiments/ring-parity-summary-20261016.json",
-      "sha256": "87b874338954de956d1470a7140f61f849cd81660b2dcd5c4bdf7169fa4dc146",
-      "size": 19381
-    },
-    "isolated_repair": "FP32 RoPE inverse-frequency metadata index2",
-    "qualified_cases_20261019": {
-      "ring-1031": {
+      "ring_1031": {
         "max_errors": {
           "final_hidden_max_abs": 0.000698089599609375,
           "hidden_layers_max_abs": 0.0118408203125,
           "logits_max_abs": 0.000308990478515625,
           "route_weight_max_abs": 4.684856506353974e-05
         },
-        "ordered_mismatches": 0,
-        "ordered_routes": 19589,
-        "result": {
-          "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
-          "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
-          "size": 649
-        },
-        "strict_pass": true,
+        "passed": true,
+        "path": "/work/AI/experiments/strata-release-qualification-20261019-r1/ring-1031/compare/result.json",
+        "route_count": 19589,
+        "route_mismatch_count": 0,
+        "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
         "tokens": 1031,
+        "tolerances": {
+          "output": "0.001 + 0.001 * abs(reference)",
+          "weights": "1e-5 + 1e-4 * abs(reference)"
+        },
         "top1_exact": true
       }
     },
-    "qualified_operator_profile_20261019": {
-      "--attention-backend": "torch-cuda",
-      "--matmul": "fp32-cublas",
-      "--pointwise": "torch-cuda",
-      "--rms-mode": "torch-cuda",
-      "--rope-frequency": "original",
-      "--router": "torch-cuda"
-    },
-    "source_ordered_fp32_173": {
-      "ordered_mismatches": 0,
-      "strict_pass": false,
-      "top1_exact": true
-    },
-    "status": "bounded_strict_parity_passed"
+    "profile_sha256": "d64f52692b2eab2fecac78ac18928c14b3e386ae1a9691ffd424d85939dbe146"
   },
-  "schema": "strata-ling-ring-numeric-qualification-v1",
-  "scope": "Bounded original-cached CUDA parity and four-position default preservation only. Fresh quality, efficiency, training, and production admission remain distinct gates.",
-  "selected_evidence": [
-    {
-      "path": "/work/AI/experiments/ring-torch-qualification-20261016-r2/1031-bf16-gemv/RESULT.json",
-      "sha256": "3ad6d7e08fc4ec3c5ecc3bf81254c51928bc725c5b148d4b5ccd941dd02e9561",
-      "size": 1309
+  "production_ready": false,
+  "promotion": false,
+  "protocol_caveats": {
+    "audit_path": "/work/AI/experiments/strata-pilot-independent-audit-20261019-r1/AUDIT.json",
+    "c01": "marker spacing is similarly ambiguous; tuple semantics are independent.",
+    "c02": "semantic ordering failure; marker spacing is ambiguous because the case says no spaces after FINAL: while the global contract requires FINAL: <answer>.",
+    "other_cases": "only-value/list cases do not contain this explicit no-spaces-after-FINAL wording."
+  },
+  "quality_gate_passed": false,
+  "quality_gate_passed_by_model": {
+    "ling": false,
+    "ring": false
+  },
+  "quantized": false,
+  "release_build": {
+    "binaries": {
+      "ling": {
+        "path": "/work/AI/experiments/strata-release-qualification-20261019-r1/ling-build/strata_ling_bf16",
+        "sha256": "048b9b59e4eb64270015f77708ad64e3b8653260a40e09dfac5587269da2c837"
+      },
+      "ring": {
+        "path": "/work/AI/experiments/strata-release-qualification-20261019-r1/ring-build/strata_ring_bf16",
+        "sha256": "8ed46dfcb4c6e4eb913b892a868f8903ae2b9347e816e12a850a47b62b607137"
+      }
     },
-    {
-      "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/default173-bf16-gemv/RESULT.json",
-      "sha256": "2576a9b9db5c363f38f18d6a466f57a950477a91daf9e42b30a8603ec4bd5e09",
-      "size": 1083
-    },
-    {
-      "path": "/work/AI/experiments/ring-torch-rms-qualification-20261016-r1/173-bf16-gemv/RESULT.json",
-      "sha256": "ad5a2cfc51e7da3eee3c8ea96429fbfc0474f0292b29fc959ffd8ecc5c27a0a2",
-      "size": 1694
-    },
-    {
-      "path": "/work/AI/experiments/ring-matched-source-qualification-20261016-r1/173-fp32-cublas/RESULT.json",
-      "sha256": "90adb42e1615afdb28982c2f7d2b44cb14568594f928973463b154dea100aecc",
-      "size": 1416
-    },
-    {
-      "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/358/RESULT.json",
-      "sha256": "3275d282a954487993baf01b07340ae2a4a6f0a0d1d5c4c569a2e7ccb2d8656a",
-      "size": 1060
-    },
-    {
-      "path": "/work/AI/experiments/ling-runtime-readmission-20261016-r1/195/RESULT.json",
-      "sha256": "c8864daca44f8eee685709db1a58aeb4f9a640167ef7eff22318acea152242d8",
-      "size": 5948
-    },
-    {
-      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/gate-replay/result.json",
-      "sha256": "ca3239810f58cfaccd12519660ed4de4258980b8ac687410bc56eecde5aae446",
-      "size": 33013
-    },
-    {
-      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/norm-replay-cuda.json",
-      "sha256": "3072ceb1f17e93f70770d6a6a2ab8c761a513cf54c6976daa530e331e3339a74",
-      "size": 22972
-    },
-    {
-      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/kda-attention-replay-cuda.json",
-      "sha256": "4dba68a9c79e3120aea3dbd2f885c23de582dce1c76d112e60b997322a5675ea",
-      "size": 62805
-    },
-    {
-      "path": "/work/AI/experiments/ling-fresh-routing-20261016-r1/answer-control.json",
-      "sha256": "adbffa14ac2fc86aa1359338a1504d4f1dcb76f4819b4251a9b51373d706f64c",
-      "size": 6174
-    },
-    {
-      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ring-1031/compare/result.json",
-      "sha256": "50c94c316e35784b1d116dd0815dfba22a6afdd01a325b5c99f8c4bfceb3586b",
-      "size": 649
-    },
-    {
-      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-195/compare/result.json",
-      "sha256": "1331a3823cf5bebb928f2145b3e73c268e5006c7fa328af5d4aa197d34e24787",
-      "size": 569
-    },
-    {
-      "path": "/work/AI/experiments/strata-parity-repair-20261019-r1/ling-358/compare/result.json",
-      "sha256": "78ad387e7b449d3fd77d176a92ac412c4e7b8c8c35657322c8109f9c54f5bd08",
-      "size": 570
-    }
-  ],
-  "serving_interrupted": false,
-  "starting_commit": "b399029efac8070e4be0166d0a8969485ae256f5",
-  "status": "bounded_strict_parity_passed_release_and_fresh_quality_pending",
+    "build_record": "/work/AI/experiments/strata-release-qualification-20261019-r1/BUILD.json",
+    "build_record_sha256": "656e5ca3c4c0ad347f81a8a286746bdad28c04eca53235865b83648b5df9c689",
+    "source_head_recorded_by_build": "b399029efac8070e4be0166d0a8969485ae256f5",
+    "source_status_porcelain_recorded_by_build": [
+      " M include/strata/ring/attention.hpp",
+      " M src/ling/engine.cu",
+      " M src/ring/attention.cpp",
+      " M src/ring/engine.cu",
+      " M tools/ling_ring_bf16/CMakeLists.txt",
+      " M tools/ling_ring_bf16/CURRENT_NUMERIC_QUALIFICATION.json",
+      " M tools/ling_ring_bf16/NUMERIC_PARITY_DIAGNOSTICS.md",
+      " M tools/ling_ring_bf16/generate_ling.py",
+      " M tools/ling_ring_bf16/generate_ring.py",
+      " M tools/ling_ring_bf16/ling/CMakeLists.txt",
+      " M tools/ling_ring_bf16/run_ling_verified.py",
+      " M tools/ling_ring_bf16/run_ring_verified.py",
+      " M tools/ling_ring_bf16/tests/test_run_ling_verified.py",
+      " M tools/ling_ring_bf16/tests/test_run_ring_verified.py",
+      " M tools/ling_ring_bf16/torch_router/router_test.cpp",
+      "?? tools/ling_ring_bf16/ling/ling_torch_ops.cpp",
+      "?? tools/ling_ring_bf16/ling/ling_torch_ops.hpp",
+      "?? tools/ling_ring_bf16/ling/ling_torch_ops_test.cpp",
+      "?? tools/ling_ring_bf16/torch_router/attention.cpp",
+      "?? tools/ling_ring_bf16/torch_router/attention.hpp",
+      "?? tools/ling_ring_bf16/torch_router/pointwise.cpp",
+      "?? tools/ling_ring_bf16/torch_router/pointwise.hpp"
+    ],
+    "source_status_sha256": "8107be7ff6e3613b1060814ab33362e92315fa50fc973231d68c6a46d068e2dc"
+  },
+  "runtime_source_identity": {
+    "active_checkout": "/work/AI/src/strata-ling-ring-bf16",
+    "campaign_source_commit": "93eee22f118fe0085869f257dbbff2a56fe70a5a",
+    "note": "Campaign-START is authoritative for the pilot source binding; OPERATOR-STATE is retained as corroboration. Release build record is a distinct b399... dirty-source build identity.",
+    "pilot_implementation_commit": "93eee22f118fe0085869f257dbbff2a56fe70a5a"
+  },
+  "schema": "strata-current-numeric-qualification-v2",
+  "scope": "BF16 checkpoints with FP32 working arithmetic: bounded Release parity and completed fresh pilot only",
+  "status": "bounded_numeric_qualification",
   "tests": {
     "ling_ctest_passed": 3,
     "no_torch_build_and_cpu_rejection": {
@@ -623,5 +1173,7 @@
     },
     "python_passed": 189,
     "ring_ctest_passed": 7
-  }
+  },
+  "tests_scope": "Recorded tests on implementation commit 93eee22f; subsequent changes here are qualification documentation only.",
+  "total_exact_routed_positions": 72009
 }
