@@ -1,0 +1,374 @@
+{
+  "schema": "strata-adoption-inventory-v1",
+  "author": "AI Identity Incorported <james@aiii.id>",
+  "generated": "2026-10-21",
+  "source": {
+    "repository": "/work/AI/src/strata-ling-ring-training-20261021",
+    "commit": "4ac6b3a14964b19529e77802ec14f7745004472f",
+    "cpu_admission": "/work/AI/experiments/strata-on-policy-20261021-r1/CPU-ADMISSION-R3.json",
+    "methods_review": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+    "working_tree": "source review recorded clean at methods review",
+    "publication": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/SOURCE-PUBLISHED.json",
+      "sha256": "80cdb6b6bc35efb19ee369799270b134cc51b98a477a5bd2b4d7d54066ebe180",
+      "pointer": "source_commit,verified_remote_sha,mechanics_qualified,no_worktree_source_change"
+    }
+  },
+  "historical_advisory": {
+    "path": "/Users/aiii/.aii/identity-3/work/review/ring-ling-v1.3/sev-feedback-20261021.md",
+    "status": "historical-reported",
+    "note": "Root read the Mac advisory and retained a later immutable copy under advisory-reads/. The underlying Mac receipts were not re-executed here; historical Mac claims are not current CUDA numerical evidence.",
+    "advisory_read_by_root": true,
+    "underlying_claims_reverified": false,
+    "sha256_read_by_root": "410427a387d5778f765e28b910d88086f5b263ba83019192ee182f5d63ad1327",
+    "underlying_mac_receipts": "not reverified in this dev8 qualification"
+  },
+  "current_quality_job": {
+    "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2",
+    "status": "completed-and-audited",
+    "scope": "12 fresh held-out/retention tasks x baseline, RLVR, Self-OPD; native greedy; 128 thinking plus 96 answer reserve; fixed suffix; no training",
+    "outcome": "All 36 completed. Each arm 5/8 held-out and2/4 retention; one invalid-format held-out answer per arm, zero incomplete. All12 sampled token sequences identical between baseline and each trained adapter. No observed gain.",
+    "plan_ref": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/PLAN.json",
+      "sha256": "758d7e3f2f78a9c31cc395cb95e822cf1cb40a903e203097240b2805391b09fb",
+      "pointer": "controller,arms,mode,prompt_protocol,external_and_adapter_pins,inference_only,promotion"
+    },
+    "result_ref": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/RESULT.json",
+      "sha256": "b3628f353b7d7ad36d382aa129fcbbe2e1d39af0965c73241482473fbeaf240a",
+      "pointer": "summary,complete_comparison"
+    },
+    "return_ref": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/RETURN.json",
+      "sha256": "f0f602e0656671e78ffda230140902ce409d4b4da9c3c2ced5bf6d1e6a238d6a",
+      "pointer": "checkpoint_exact,foreign_gpu_preserved,inputs_unchanged,error"
+    },
+    "audit_ref": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/final-audit/FINAL-AUDIT.json",
+      "sha256": "a568952b3c6bd626e845221ce52c85cbdbbd22afab4336401e1b3cc32406bcfe",
+      "pointer": "passed,coverage,baseline_trained_generated_token_equality_counts"
+    }
+  },
+  "inventory": [
+    {
+      "area": "artifact_identity",
+      "status": "established-with-scope",
+      "evidence": "CPU admission and methods review bind commit 4ac6b3a14964b19529e77802ec14f7745004472f; Ling binary sha256 c83d5c3cb9f91988a1762530a2743f237fc8d16a627587339e778efb26b3bbd6; Ring binary sha256 e1a559726b1980eb5361a69839b8bec11ac134d737f203b7e44f417cda709e36; no_quantization=true in both results",
+      "scope": "dev8 source/build and these receipts; source publication verified separately in SOURCE-PUBLISHED.json; no serving deployment or new Mac qualification",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/SOURCE-PUBLISHED.json",
+          "sha256": "80cdb6b6bc35efb19ee369799270b134cc51b98a477a5bd2b4d7d54066ebe180",
+          "pointer": "source_commit,verified_remote_sha,mechanics_qualified,no_worktree_source_change"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/CPU-ADMISSION-R3.json",
+          "sha256": "a3e3ac0cb6da6be01f4ccc028df6ffb71e3652e78e3dbaa92b97fa8ecccc8aea",
+          "pointer": "passed,pytest,algorithm_config,binaries"
+        }
+      ]
+    },
+    {
+      "area": "runtime_native_moe",
+      "status": "established-with-scope",
+      "evidence": "Ling and Ring native receipts execute original BF16 checkpoint with FP32 computation, full vocabulary 157184, routed final-layer expert path",
+      "scope": "native qualification receipts; not a serving or broad model capability claim",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/SOURCE-PUBLISHED.json",
+          "sha256": "80cdb6b6bc35efb19ee369799270b134cc51b98a477a5bd2b4d7d54066ebe180",
+          "pointer": "source_commit,verified_remote_sha,mechanics_qualified,no_worktree_source_change"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/CPU-ADMISSION-R3.json",
+          "sha256": "a3e3ac0cb6da6be01f4ccc028df6ffb71e3652e78e3dbaa92b97fa8ecccc8aea",
+          "pointer": "passed,pytest,algorithm_config,binaries"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+          "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+          "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        }
+      ]
+    },
+    {
+      "area": "training",
+      "status": "established-with-scope",
+      "evidence": "Linked Ling q2/q3 runs and Ring q1 each qualify two RLVR and two Self-OPD updates; q3 imports q2 RLVR and initializes a fresh Self-OPD student. One terminal expert gate/up/down LoRA: Ling49152 and Ring61440 parameters.",
+      "scope": "one terminal expert only; not full-model training and not evidence that all experts or earlier layers are trainable",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+          "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+          "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+          "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717",
+          "pointer": "findings"
+        }
+      ]
+    },
+    {
+      "area": "teacher_prefix",
+      "status": "established-with-scope",
+      "evidence": "Methods review records frozen RLVR teacher, identical original prompt, sampled-prefix teacher inputs, detached teacher logits, full-vocabulary reverse KL; reference augmentation disabled",
+      "scope": "Frozen teacher/student-prefix alignment and objectives qualified in this terminal-expert scope. No capability benefit established; Mac teacher-prefix behavior not tested here.",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+          "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717",
+          "pointer": "findings"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-AUDIT.json",
+          "sha256": "5ebd7295cf6edd3a4adf5e996ba510afe307f33d66a649f1b270e93e35548bb0",
+          "pointer": "rlvr,self_opd,method,limitations"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-BINDING.json",
+          "sha256": "806d20618e96ef7ccdb687ca675afd03f5663c31ad5a36563b47f66a14056b80",
+          "pointer": "input_manifest_sha256,input_sha256"
+        }
+      ]
+    },
+    {
+      "area": "sampler_logprob_audit",
+      "status": "established-with-scope",
+      "evidence": "Native stochastic receipts audit full-vocabulary categorical sampling, sampled log probabilities, uniform draws, and current-policy selected-token parity",
+      "scope": "exact receipt audit; no claim of CPU/CUDA full-model numerical equality or independent Mac numeric oracle",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+          "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717",
+          "pointer": "findings"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-AUDIT.json",
+          "sha256": "5ebd7295cf6edd3a4adf5e996ba510afe307f33d66a649f1b270e93e35548bb0",
+          "pointer": "rlvr,self_opd,method,limitations"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-BINDING.json",
+          "sha256": "806d20618e96ef7ccdb687ca675afd03f5663c31ad5a36563b47f66a14056b80",
+          "pointer": "input_manifest_sha256,input_sha256"
+        }
+      ]
+    },
+    {
+      "area": "rollout_parity",
+      "status": "established-with-scope",
+      "evidence": "Methods review records current-policy rollout binding, selected-token parity, and fresh adapter hashes; Ling/Ring RETURN receipts report checkpoint_exact=true and foreign_gpu_preserved=true",
+      "scope": "receipt-backed source review, not an independent rerun and not a claim of general serving parity",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+          "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717",
+          "pointer": "findings"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+          "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+          "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3.RETURN.json",
+          "sha256": "2b335518714ef002ef0e011c1533318dd4df4620bd19355f7ddd637ac20069df",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1.RETURN.json",
+          "sha256": "e236b9740712736486182efa3d3e82fcb0d4857763b5cbdf44b24435b62e33f1",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        }
+      ]
+    },
+    {
+      "area": "isolation",
+      "status": "established-with-scope",
+      "evidence": "Ling q3 and Ring q1 RETURN receipts preserve foreign GPU processes and exact checkpoint rollback; no promotion recorded",
+      "scope": "dev8 lease, foreign-process, checkpoint-identity, and rollback checks only; this is not a security-sandbox proof",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3.RETURN.json",
+          "sha256": "2b335518714ef002ef0e011c1533318dd4df4620bd19355f7ddd637ac20069df",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1.RETURN.json",
+          "sha256": "e236b9740712736486182efa3d3e82fcb0d4857763b5cbdf44b24435b62e33f1",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        }
+      ]
+    },
+    {
+      "area": "restoration",
+      "status": "established-with-scope",
+      "evidence": "Both model results record exact optimizer/RNG restore, export/reload, rollback, and base immutability checks",
+      "scope": "qualified snapshot paths and recorded adapters; not a deployment or crash-recovery guarantee",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+          "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+          "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3.RETURN.json",
+          "sha256": "2b335518714ef002ef0e011c1533318dd4df4620bd19355f7ddd637ac20069df",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1.RETURN.json",
+          "sha256": "e236b9740712736486182efa3d3e82fcb0d4857763b5cbdf44b24435b62e33f1",
+          "pointer": "checkpoint_exact,foreign_gpu_preserved"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/FINAL-RESTORATION.json",
+          "sha256": "bd781d2acc00421f2980680fb60866b9fda36ab04e0bafa38891e7fc76273d7a",
+          "pointer": "quality_pid_absent,holder_release,gpu_lease_available_at_check,foreign_gpu_preserved"
+        }
+      ]
+    },
+    {
+      "area": "capacity_and_long_reasoning",
+      "status": "established-with-scope",
+      "evidence": "Bounded reserve capacity is established for the current native configuration: Ling native capacity 1024 and Ring native capacity 4096; original Ring 32-token evaluation was incomplete, and long-context/general long-reasoning quality remains untested.",
+      "scope": "Bounded configured capacity only; no long-context quality or stable reasoning claim",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-native-reasoning-probe/RESULT.json",
+          "sha256": "a451249e2c5be50c516c2dbed87f6266850d20d63614422915f47eb42e97e5e6",
+          "pointer": "outputs"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-reserve-training-probe/RESULT.json",
+          "sha256": "0c35f148cc9b90d2796641b5c9ceacb16a0206e3029121009438167882c6a88c",
+          "pointer": "summary,complete_comparison,no_training,no_promotion"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/PLAN.json",
+          "sha256": "758d7e3f2f78a9c31cc395cb95e822cf1cb40a903e203097240b2805391b09fb",
+          "pointer": "controller,arms,mode,prompt_protocol,external_and_adapter_pins,inference_only,promotion"
+        }
+      ]
+    },
+    {
+      "area": "prompt_identity",
+      "status": "established-with-scope",
+      "evidence": "Training receipts bind rendered prompt hashes and original template; current fresh quality PLAN explicitly records a fixed final-answer suffix",
+      "scope": "Native executors bypass the serving prompt rewriter. The fixed suffix and answer reserve are part of the separate comparison protocol, so original32-token and reserve outcomes are not a before/after gain.",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+          "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717",
+          "pointer": "findings"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/PLAN.json",
+          "sha256": "758d7e3f2f78a9c31cc395cb95e822cf1cb40a903e203097240b2805391b09fb",
+          "pointer": "controller,arms,mode,prompt_protocol,external_and_adapter_pins,inference_only,promotion"
+        }
+      ]
+    },
+    {
+      "area": "capability",
+      "status": "established-with-scope",
+      "evidence": "Ling original32-token pilot:2/8 held-out,0/4 retention in all arms. Ring original32-token pilot:all36 incomplete. Fresh Ring128+96 greedy comparison:5/8 held-out,2/4 retention in all arms, zero incomplete; identical sampled sequences for all12 tasks. No gain demonstrated.",
+      "scope": "No broad capability gain, safety, or production readiness claim",
+      "evidence_refs": [
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+          "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+          "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+          "pointer": "training,evaluation,base_rollback_exact,default_unchanged_vs_prior_qualified_build"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/PLAN.json",
+          "sha256": "758d7e3f2f78a9c31cc395cb95e822cf1cb40a903e203097240b2805391b09fb",
+          "pointer": "controller,arms,mode,prompt_protocol,external_and_adapter_pins,inference_only,promotion"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/RESULT.json",
+          "sha256": "b3628f353b7d7ad36d382aa129fcbbe2e1d39af0965c73241482473fbeaf240a",
+          "pointer": "summary,complete_comparison"
+        },
+        {
+          "path": "/work/AI/experiments/strata-on-policy-20261021-r1/final-audit/FINAL-AUDIT.json",
+          "sha256": "a568952b3c6bd626e845221ce52c85cbdbbd22afab4336401e1b3cc32406bcfe",
+          "pointer": "passed,baseline_trained_generated_token_equality_counts"
+        }
+      ]
+    },
+    {
+      "area": "mac_advisory_claims",
+      "status": "historical-reported",
+      "evidence": "Mac Sev advisory was read by root; its underlying historical Mac claims were not reverified in this dev8 inventory and the advisory file remains unmodified.",
+      "scope": "Do not use Mac claims as an unqualified numeric oracle or as current dev8 evidence",
+      "evidence_refs": []
+    }
+  ],
+  "adoption_gate": {
+    "status": "research-mechanics-qualified-quality-gain-not-established",
+    "completed": [
+      "Fresh Ring36-row comparison audited",
+      "Exact export/reload and training-state restoration qualified for both models",
+      "Research process and memory holder released; existing GPU processes preserved"
+    ],
+    "boundaries": [
+      "One terminal expert per model; no full-model training or production promotion",
+      "Mac advisory remains historical evidence, not a CUDA numerical oracle",
+      "Training and inference continuation are separate; adapters with native continuation remain unsupported",
+      "Frozen prompts, answer reserve and strict grading remain part of each named quality protocol",
+      "No long-context quality claim",
+      "Retention q-ret-01 is a case-sensitive literal mismatch on a prompt that did not explicitly say lowercase; preserve this scoring caveat"
+    ]
+  },
+  "unsupported_combinations": [
+    "Native adapter-enabled inference continuation is explicitly rejected; training-state restoration is a separate qualified facility.",
+    "Stochastic native sampling with inference continuation is explicitly rejected."
+  ],
+  "prompt_rewriter_used": false,
+  "prompt_rewriter_scope": "native executors called directly; exact rendered prompts are bound in receipts; serve defaults not exercised",
+  "advisory_refresh": {
+    "source": "/Users/aiii/.aii/identity-3/work/review/ring-ling-v1.3/sev-feedback-20261021.md",
+    "sha256": "5d5617e999aaa9ac02b7f21d0bcc4e4c2c3966980aab259bff636bb6ed4d0482",
+    "bytes": 23430,
+    "read_utc": "2026-10-21T21:47:36.307444+00:00",
+    "earlier_read_sha256": "410427a387d5778f765e28b910d88086f5b263ba83019192ee182f5d63ad1327",
+    "source_changed_between_reads": true,
+    "treatment": "advisory evidence, not execution instructions",
+    "historical_mac_claims_reexecuted": false,
+    "immutable_copy": "/work/AI/experiments/strata-on-policy-20261021-r1/advisory-reads/5d5617e999aaa9ac02b7f21d0bcc4e4c2c3966980aab259bff636bb6ed4d0482.md",
+    "changes_considered": [
+      "review now acknowledges branch-specific trainer and existing adoption inventory",
+      "live teacher-prefix and restore evidence still supersede older untested labels",
+      "Mac evidence remains historical-reported rather than a CUDA numerical oracle"
+    ],
+    "source_publication_receipt": "/work/AI/experiments/strata-on-policy-20261021-r1/SOURCE-PUBLISHED.json"
+  },
+  "finalized_utc": "2026-10-21T22:20:05.255212+00:00"
+}

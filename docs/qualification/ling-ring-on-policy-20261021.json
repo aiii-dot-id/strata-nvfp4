@@ -1,0 +1,496 @@
+{
+  "schema": "strata-actual-on-policy-final-summary-v1",
+  "qualified_source": "4ac6b3a14964b19529e77802ec14f7745004472f",
+  "host": "dev8 RTX4070Ti",
+  "base_precision": "original BF16, FP32 native arithmetic, FP64 KL objective",
+  "quantization": false,
+  "promotion": false,
+  "models": {
+    "ling": {
+      "run": "ling-q3",
+      "scope": "one final-layer expert gate/up/down LoRA",
+      "expert": 47,
+      "trainable_parameters": 49152,
+      "methods": {
+        "rlvr": {
+          "fresh_updates": 2,
+          "adapter_sha256": "b097aca749788c915cfea1790ae00c7cfae1c78b1b8f6621c5ffdb40b564f46f",
+          "export_reload_exact": true,
+          "optimizer_rng_exact": true,
+          "training_state_restore_exact": true,
+          "native_forward": {
+            "argmax_equal": true,
+            "max_abs": 3.814697265625e-06,
+            "mean_abs": 1.0366701275188461e-07,
+            "passed": true,
+            "shape": [
+              32,
+              157184
+            ],
+            "tolerance_pass": true
+          },
+          "gradient_norms": [
+            0.0006158023133297945,
+            2.3273725587957385e-05
+          ],
+          "losses": [
+            -0.3824060261249542,
+            -0.12224108725786209
+          ],
+          "post_update_losses": [
+            -0.382456511259079,
+            -0.1222415640950203
+          ]
+        },
+        "self_opd": {
+          "fresh_updates": 2,
+          "adapter_sha256": "bc23fd08cd21692c2ecd233c01058de7d51b4ac8dc1a850f54ef72f4f9937471",
+          "export_reload_exact": true,
+          "optimizer_rng_exact": true,
+          "training_state_restore_exact": true,
+          "native_forward": {
+            "argmax_equal": true,
+            "max_abs": 3.814697265625e-06,
+            "mean_abs": 8.809659156352695e-08,
+            "passed": true,
+            "shape": [
+              32,
+              157184
+            ],
+            "tolerance_pass": true
+          },
+          "gradient_norms": [
+            1.197473654708105e-06,
+            6.6357690777667465e-06
+          ],
+          "losses": [
+            2.305379660848675e-08,
+            1.7116924309106252e-07
+          ],
+          "post_update_losses": [
+            1.633482188924063e-08,
+            2.0040278236096457e-08
+          ]
+        }
+      },
+      "base_rollback": {
+        "exact_files": 27
+      },
+      "checkpoint_exact": true,
+      "foreign_gpu_preserved": true,
+      "original_quality": {
+        "baseline": {
+          "held_out": {
+            "correct": 2,
+            "incomplete": 1,
+            "n": 8,
+            "verified_per_inference_hour": 45.80742436225455,
+            "wall_seconds": 157.17976070998702
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 1,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 75.92593313998077
+          }
+        },
+        "rlvr": {
+          "held_out": {
+            "correct": 2,
+            "incomplete": 1,
+            "n": 8,
+            "verified_per_inference_hour": 45.75865308788546,
+            "wall_seconds": 157.34728874496068
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 1,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 76.80120907703531
+          }
+        },
+        "self_opd": {
+          "held_out": {
+            "correct": 2,
+            "incomplete": 1,
+            "n": 8,
+            "verified_per_inference_hour": 45.72410485053193,
+            "wall_seconds": 157.4661772720574
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 1,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 76.16158559199539
+          }
+        }
+      },
+      "original_quality_status": "no measured gain",
+      "source_result_sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726",
+      "return_sha256": "2b335518714ef002ef0e011c1533318dd4df4620bd19355f7ddd637ac20069df"
+    },
+    "ring": {
+      "run": "ring-q1",
+      "scope": "one final-layer expert gate/up/down LoRA",
+      "expert": 194,
+      "trainable_parameters": 61440,
+      "methods": {
+        "rlvr": {
+          "fresh_updates": 2,
+          "adapter_sha256": "51e9aee55c33ddaf0f046018823b4f1a644716d28787288e06f635756938e72a",
+          "export_reload_exact": true,
+          "optimizer_rng_exact": true,
+          "training_state_restore_exact": true,
+          "native_forward": {
+            "argmax_equal": true,
+            "max_abs": 1.9073486328125e-06,
+            "mean_abs": 1.985273179002804e-08,
+            "passed": true,
+            "shape": [
+              32,
+              157184
+            ],
+            "tolerance_pass": true
+          },
+          "gradient_norms": [
+            0.0001538790330299478,
+            0.00027067383899095936
+          ],
+          "losses": [
+            -0.47523555159568787,
+            -0.44167500734329224
+          ],
+          "post_update_losses": [
+            -0.47524893283843994,
+            -0.44170472025871277
+          ]
+        },
+        "self_opd": {
+          "fresh_updates": 2,
+          "adapter_sha256": "e36f4a319e1c1f4e9c226a45537d7ea817241f3355c9e44c78ff33e1f21aacce",
+          "export_reload_exact": true,
+          "optimizer_rng_exact": true,
+          "training_state_restore_exact": true,
+          "native_forward": {
+            "argmax_equal": true,
+            "max_abs": 3.814697265625e-06,
+            "mean_abs": 1.7858251384368428e-08,
+            "passed": true,
+            "shape": [
+              32,
+              157184
+            ],
+            "tolerance_pass": true
+          },
+          "gradient_norms": [
+            5.905754951624057e-06,
+            8.24669275067249e-06
+          ],
+          "losses": [
+            7.732262757791885e-07,
+            4.337218325162838e-07
+          ],
+          "post_update_losses": [
+            4.326615442783392e-07,
+            3.944263783114003e-08
+          ]
+        }
+      },
+      "base_rollback": {
+        "exact_files": 23
+      },
+      "checkpoint_exact": true,
+      "foreign_gpu_preserved": true,
+      "original_quality": {
+        "baseline": {
+          "held_out": {
+            "correct": 0,
+            "incomplete": 8,
+            "n": 8,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 150.13888090703404
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 4,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 70.76608877698891
+          }
+        },
+        "rlvr": {
+          "held_out": {
+            "correct": 0,
+            "incomplete": 8,
+            "n": 8,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 150.56259874399984
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 4,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 70.74424231302692
+          }
+        },
+        "self_opd": {
+          "held_out": {
+            "correct": 0,
+            "incomplete": 8,
+            "n": 8,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 150.0565532190667
+          },
+          "retention": {
+            "correct": 0,
+            "incomplete": 4,
+            "n": 4,
+            "verified_per_inference_hour": 0.0,
+            "wall_seconds": 70.46802735401434
+          }
+        }
+      },
+      "original_quality_status": "inconclusive: all 36 trajectories truncated",
+      "source_result_sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402",
+      "return_sha256": "e236b9740712736486182efa3d3e82fcb0d4857763b5cbdf44b24435b62e33f1"
+    }
+  },
+  "ring_quality_followup": {
+    "protocol": "greedy, original native reasoning template plus fixed final-format instruction; 128 thinking tokens and up to96 answer tokens; forced close only when needed; full-prefix replay",
+    "candidates_frozen_before_suite_creation": true,
+    "summary": {
+      "baseline": {
+        "held_out": {
+          "correct": 5,
+          "incomplete": 0,
+          "invalid_format": 1,
+          "n": 8,
+          "verified_per_instrumented_hour": 22.511216609225492,
+          "wall_seconds": 799.6013859430095
+        },
+        "retention": {
+          "correct": 2,
+          "incomplete": 0,
+          "invalid_format": 0,
+          "n": 4,
+          "verified_per_instrumented_hour": 18.628620402785437,
+          "wall_seconds": 386.5020513769996
+        }
+      },
+      "rlvr": {
+        "held_out": {
+          "correct": 5,
+          "incomplete": 0,
+          "invalid_format": 1,
+          "n": 8,
+          "verified_per_instrumented_hour": 22.51954168867262,
+          "wall_seconds": 799.3057873399812
+        },
+        "retention": {
+          "correct": 2,
+          "incomplete": 0,
+          "invalid_format": 0,
+          "n": 4,
+          "verified_per_instrumented_hour": 18.748894296554585,
+          "wall_seconds": 384.0226461420243
+        }
+      },
+      "self_opd": {
+        "held_out": {
+          "correct": 5,
+          "incomplete": 0,
+          "invalid_format": 1,
+          "n": 8,
+          "verified_per_instrumented_hour": 22.45652261737867,
+          "wall_seconds": 801.5488553900213
+        },
+        "retention": {
+          "correct": 2,
+          "incomplete": 0,
+          "invalid_format": 0,
+          "n": 4,
+          "verified_per_instrumented_hour": 18.715536136247547,
+          "wall_seconds": 384.7071196670295
+        }
+      }
+    },
+    "completed_rows": 36,
+    "audit_passed": true,
+    "final_outcome_equality_to_baseline": {
+      "rlvr": 12,
+      "self_opd": 12
+    },
+    "sampled_token_equality_to_baseline": {
+      "rlvr": 12,
+      "self_opd": 12
+    },
+    "original_32_token_failure_preserved": true,
+    "not_a_before_after_protocol_gain": true,
+    "return": {
+      "checkpoint_exact": true,
+      "error": null,
+      "foreign_gpu_preserved": true,
+      "inputs_unchanged": true,
+      "lifecycle_errors": [],
+      "wall_seconds": 3566.4041314299975
+    },
+    "strict_scores_equal_across_arms": true
+  },
+  "finalized_utc": "2026-10-21T22:19:13.756243+00:00",
+  "quality_conclusion": "No promotion. Mechanical qualification does not establish capability gain; report each frozen protocol separately.",
+  "ring_retention_casing_caveat": {
+    "task": "q-ret-01",
+    "frozen_expected_literal": "r",
+    "observed_answer": "R",
+    "strict_primary_grading_unchanged": true,
+    "interpretation": "The third-letter prompt does not explicitly state lowercase; strict literal case mismatch should not be described as a demonstrated reasoning error.",
+    "by_arm": {
+      "baseline": {
+        "answer": "R",
+        "grade": {
+          "reason": "wrong_answer",
+          "reward": 0
+        }
+      },
+      "rlvr": {
+        "answer": "R",
+        "grade": {
+          "reason": "wrong_answer",
+          "reward": 0
+        }
+      },
+      "self_opd": {
+        "answer": "R",
+        "grade": {
+          "reason": "wrong_answer",
+          "reward": 0
+        }
+      }
+    }
+  },
+  "training_reward_limit": "Every arithmetic RLVR group had zero direct RLOO advantage; nonzero direct RLVR signal came only from an extraction group for each model. Self-OPD also scored arithmetic prefixes; no arithmetic learning gain is inferred.",
+  "tests": {
+    "training_cpu_passed": 274,
+    "native_components": {
+      "ling": 3,
+      "ring": 9
+    },
+    "reserve_parser_controller_cpu_passed": 29,
+    "final_auditor_mutation_matrix": "healthy fixture accepted; eight corrupted cases rejected; independently rerun"
+  },
+  "authority": {
+    "host": "dev8",
+    "quantization": false,
+    "promoted": false,
+    "mac_model_or_service_changes": false,
+    "foreign_gpu_processes_preserved": true
+  },
+  "restoration": {
+    "schema": "strata-on-policy-final-restoration-v1",
+    "created_utc": "2026-10-21T22:19:05.438231+00:00",
+    "quality_pid_absent": true,
+    "quality_return_sha256": "f0f602e0656671e78ffda230140902ce409d4b4da9c3c2ced5bf6d1e6a238d6a",
+    "holder_release": {
+      "pid": 1352059,
+      "start_tick": "13467696",
+      "signal": "SIGTERM",
+      "exited": true,
+      "argv_verified": true,
+      "created_utc": "2026-10-21T22:19:04.694303+00:00"
+    },
+    "gpu_lease_available_at_check": true,
+    "foreign_gpu_preserved": true,
+    "gpu_processes_at_check": [
+      {
+        "pid": 25927,
+        "name": "/usr/bin/parsecd",
+        "mib": 72,
+        "start": "60218"
+      },
+      {
+        "pid": 3215818,
+        "name": "/root/.aii/plugins/r/0a672e4ce882ee6b/bin/aii_voice_worker",
+        "mib": 3170,
+        "start": "9689860"
+      }
+    ],
+    "checkpoint_unchanged_per_qualified_return": true,
+    "service_actions": [],
+    "mac_model_or_service_changes": false,
+    "no_weights_promoted": true
+  },
+  "evidence": {
+    "ling-q3/RESULT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3/RESULT.json",
+      "sha256": "69e95eced095214c32437baefa55dd29ce5c5df8c5d26a9d3ada1d2f752fb726"
+    },
+    "ling-q3.RETURN.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ling-q3.RETURN.json",
+      "sha256": "2b335518714ef002ef0e011c1533318dd4df4620bd19355f7ddd637ac20069df"
+    },
+    "ring-q1/RESULT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1/RESULT.json",
+      "sha256": "f34a8707b2e8122630ff431fc371087388e48d3a2ab901ffb85bc310c583f402"
+    },
+    "ring-q1.RETURN.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-q1.RETURN.json",
+      "sha256": "e236b9740712736486182efa3d3e82fcb0d4857763b5cbdf44b24435b62e33f1"
+    },
+    "ring-fresh-quality-q2/RESULT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/RESULT.json",
+      "sha256": "b3628f353b7d7ad36d382aa129fcbbe2e1d39af0965c73241482473fbeaf240a"
+    },
+    "ring-fresh-quality-q2/RETURN.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/RETURN.json",
+      "sha256": "f0f602e0656671e78ffda230140902ce409d4b4da9c3c2ced5bf6d1e6a238d6a"
+    },
+    "ring-fresh-quality-q2/PLAN.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/ring-fresh-quality-q2/PLAN.json",
+      "sha256": "758d7e3f2f78a9c31cc395cb95e822cf1cb40a903e203097240b2805391b09fb"
+    },
+    "final-audit/FINAL-AUDIT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/final-audit/FINAL-AUDIT.json",
+      "sha256": "a568952b3c6bd626e845221ce52c85cbdbbd22afab4336401e1b3cc32406bcfe"
+    },
+    "final-audit/CPU-ADMISSION.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/final-audit/CPU-ADMISSION.json",
+      "sha256": "6f16274f8edc8d2690ea1c1898d13bcea170471863074efcd7fd6094284006fd"
+    },
+    "REVIEW-METHODS-FINAL.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REVIEW-METHODS-FINAL.json",
+      "sha256": "c4bd1c616db6295249eba6ac8f407399cbf23dd7b727057a9136fa9500065717"
+    },
+    "NUMERICAL-OBJECTIVE-AUDIT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-AUDIT.json",
+      "sha256": "5ebd7295cf6edd3a4adf5e996ba510afe307f33d66a649f1b270e93e35548bb0"
+    },
+    "NUMERICAL-OBJECTIVE-BINDING.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/NUMERICAL-OBJECTIVE-BINDING.json",
+      "sha256": "806d20618e96ef7ccdb687ca675afd03f5663c31ad5a36563b47f66a14056b80"
+    },
+    "REWARD-SIGNAL-DIAGNOSTIC.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/REWARD-SIGNAL-DIAGNOSTIC.json",
+      "sha256": "2fef1ecdf4fb32fd99d95948d9d7b91aeaad19f4c74dff883735037d6c7925c8"
+    },
+    "COST-AND-NEXT-GATES.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/COST-AND-NEXT-GATES.json",
+      "sha256": "adcb222466899c7f10c4c609631c058432d85f4fb5abb3464696d09367acd0a8"
+    },
+    "TEACHER-CAPTURE-REUSE-ASSESSMENT.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/TEACHER-CAPTURE-REUSE-ASSESSMENT.json",
+      "sha256": "a31696f7fd4a2be0fb193e7a62f523a76e3871d44d99860707e268b30353f0b0"
+    },
+    "SOURCE-PUBLISHED.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/SOURCE-PUBLISHED.json",
+      "sha256": "80cdb6b6bc35efb19ee369799270b134cc51b98a477a5bd2b4d7d54066ebe180"
+    },
+    "FINAL-RESTORATION.json": {
+      "path": "/work/AI/experiments/strata-on-policy-20261021-r1/FINAL-RESTORATION.json",
+      "sha256": "bd781d2acc00421f2980680fb60866b9fda36ab04e0bafa38891e7fc76273d7a"
+    }
+  }
+}
