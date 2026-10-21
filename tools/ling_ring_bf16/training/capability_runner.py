@@ -52,17 +52,18 @@ def coverage(records):
                     'all_groups':[{'task':k,'rewards':[r['grade']['reward'] for r in v]} for k,v in groups.items()]}
     passed=all(v['mixed_groups'] and v['completion_rate']>=CONFIG['min_completion_rate'] for v in by.values())
     return {'passed':passed,'families':by,'requirement':'at least one mixed sampled prompt group per target family; failures retained'}
-def nomination(records,h):
-    adv=advantages(records);counts={f:torch.zeros(256,dtype=torch.float64) for f in tasks.FAMILIES}
+def nomination(records,h,active_families=tasks.FAMILIES):
+    if not active_families or len(set(active_families))!=len(active_families) or not set(active_families)<=set(tasks.FAMILIES):raise ValueError('invalid active families')
+    adv=advantages(records);counts={f:torch.zeros(256,dtype=torch.float64) for f in active_families}
     for r,a in zip(records,adv):
-        if a==0:continue
+        if a==0 or r['family'] not in counts:continue
         ids=r['features'][:,3*h:3*h+8].long().flatten()
         counts[r['family']]+=torch.bincount(ids,minlength=256).double()*abs(a)
     normalized=[v/max(float(v.sum()),1.) for v in counts.values()]
     score=torch.stack(normalized).min(0).values
     expert=int(score.argmax())
-    if not float(score[expert])>0:raise ValueError('no expert exposed to informative groups in both families')
-    return expert,{'expert':expert,'rule':'maximum minimum family share of advantage-weighted sampled-token routes','counts':{k:v.tolist() for k,v in counts.items()},'score':float(score[expert])}
+    if not float(score[expert])>0:raise ValueError('no expert exposed to informative groups in both families' if len(active_families)==2 else 'no expert exposed to informative groups in the active family')
+    return expert,{'expert':expert,'active_families':list(active_families),'rule':'maximum minimum family share of advantage-weighted sampled-token routes','counts':{k:v.tolist() for k,v in counts.items()},'score':float(score[expert])}
 def summarize(rows):
     out={}
     for arm in sorted({r['arm'] for r in rows}):
@@ -79,7 +80,7 @@ def select_teacher(rows):
         return [dict(task=r['task'],split=r['split'],family=r['family'],reward=r['grade']['reward']) for r in rows if r['arm']==name]
     return tasks.teacher_selection_bound(arm('baseline'),arm('rlvr'))
 
-def run(model,suite,private,out,checkpoint_digest):
+def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_saturated_controls=False):
     out=Path(out);out.mkdir(parents=True,exist_ok=False)
     all_tasks=tasks.load_suite(suite,private)
     if len([t for t in all_tasks if t.split=='teacher_selection'])!=16:raise ValueError('selection count')
@@ -100,7 +101,10 @@ def run(model,suite,private,out,checkpoint_digest):
                  thinking_tokens=CONFIG['ring_thinking_tokens'],answer_tokens=CONFIG['ring_answer_tokens'],
                  context_capacity=cfg['capacity'],eos_token_ids=tuple(eos))
     native.dump(out/'PLAN.json',dict(CONFIG,model=model,pins=pins,completion=dataclasses.asdict(controller),
-                 heldout_sealed_until_freeze=True,old_qualification_source='4ac6b3a14964b19529e77802ec14f7745004472f',
+                 heldout_sealed_until_freeze=True,allow_saturated_controls=allow_saturated_controls,
+                 calibration_from=str(calibration_from) if calibration_from else None,
+                 calibration_reuse='admission and nomination only; all optimizer updates use fresh rollouts',
+                 old_qualification_source='4ac6b3a14964b19529e77802ec14f7745004472f',
                  suite_schema='fresh task prompts and evaluator-only private oracles'))
     start=time.monotonic();trainer=None;native_count=0
     def stage(path,ids,**kw):
@@ -179,14 +183,30 @@ def run(model,suite,private,out,checkpoint_digest):
     try:
         train=[x for x in all_tasks if x.split=='training']
         calibration=[x for f in tasks.FAMILIES for x in [y for y in train if y.family==f][:CONFIG['calibration_tasks_per_family']]]
-        initial=collect(calibration,'calibration',0,None);cov=coverage(initial);native.dump(out/'COVERAGE.json',cov)
+        if calibration_from:
+            if not allow_saturated_controls:raise ValueError('calibration reuse requires explicit scoped admission')
+            from import_calibration import import_calibration
+            initial=import_calibration(calibration_from,out/'PLAN.json',out/'CALIBRATION-IMPORT.json',calibration,tok)
+        else:
+            initial=collect(calibration,'calibration',0,None)
+        cov=coverage(initial);active_families=list(tasks.FAMILIES);controls=[]
+        if allow_saturated_controls:
+            from admission_scope import classify_calibration
+            try:
+                scope=classify_calibration(initial)
+                active_families=scope['active_families'];controls=scope['retention_control_families']
+                cov.update(passed=True,scoped_admission=scope,strict_two_family_gate=cov['passed'],
+                    requirement='every active family has a mixed within-prompt reward group; fully correct families are retention controls only')
+            except ValueError as ex:
+                cov.update(passed=False,scoped_admission_error=str(ex))
+        native.dump(out/'COVERAGE.json',cov)
         if not cov['passed']:
             result={'status':'coverage_gate_failed','model':model,'coverage':cov,'updates':0,'self_opd_run':False,'no_quantization':True,
                     'next':'repair development completion or task difficulty before training; no heldout examined','native_calls':native_count}
             native.dump(out/'RESULT.json',result);return result
-        activeids=[tid for f in tasks.FAMILIES for tid in cov['families'][f]['mixed_groups'][:CONFIG['max_training_groups_per_family']]]
+        activeids=[tid for f in active_families for tid in cov['families'][f]['mixed_groups'][:CONFIG['max_training_groups_per_family']]]
         active=[x for x in train if x.id in activeids]
-        expert,nom=nomination(initial,cfg['hidden']);native.dump(out/'NOMINATION.json',dict(nom,active_training_ids=activeids))
+        expert,nom=nomination(initial,cfg['hidden'],active_families);native.dump(out/'NOMINATION.json',dict(nom,active_training_ids=activeids))
         torch.manual_seed(CONFIG['seed']);torch.cuda.manual_seed_all(CONFIG['seed'])
         trainer=terminal.build_terminal(cp,model,expert,rank=CONFIG['rank'],alpha=CONFIG['alpha'],device='cpu')
         initial_params={k:v.detach().clone() for k,v in trainer.named_parameters()};frozen=qualify.tensors_digest(trainer.named_buffers())
@@ -196,7 +216,7 @@ def run(model,suite,private,out,checkpoint_digest):
         native.dump(out/'ZERO-PARITY.json',{'exact':True,'baseline':str(initial[0]['path']),'zero':str(z['path'])})
         # Calibration decides a fixed prompt pool; no candidate-dependent rejection sampling.
         native.dump(out/'TRAINING-ADMISSION.json',{'scope':'one terminal expert','expert':expert,'active_ids':activeids,
-                    'coverage':cov,'fixed_rounds':CONFIG['rlvr_rounds'],'lr':CONFIG['lr'],'heldout_used':False})
+                    'coverage':cov,'active_families':active_families,'retention_control_families':controls,'fixed_rounds':CONFIG['rlvr_rounds'],'lr':CONFIG['lr'],'heldout_used':False})
         results={};adapters={'baseline':None};frozen_teacher=None
         selection=[x for x in all_tasks if x.split=='teacher_selection']
         for arm in ('rlvr','self_opd'):
@@ -259,7 +279,7 @@ def run(model,suite,private,out,checkpoint_digest):
                 if frozen!=qualify.tensors_digest(trainer.named_buffers()):raise ValueError('frozen weights mutated')
                 del records;release(trainer)
             if len(steps)<2:raise ValueError('fewer than two genuine updates; continuation unqualified')
-            if arm=='rlvr' and any(not any(s['family_gradient_norm'].get(f,0)>0 for s in steps) for f in tasks.FAMILIES):
+            if arm=='rlvr' and any(not any(s['family_gradient_norm'].get(f,0)>0 for s in steps) for f in active_families):
                 raise ValueError('training lacks actual gradients for a target family')
             adapters[arm]=current;results[arm]={'steps':len(steps),'adapter_sha256':native.sha(current),'last_gradient_norm':steps[-1]['gradient_norm']}
             # Explicit export/reload after clobbering only the research parameters.
@@ -293,12 +313,13 @@ def run(model,suite,private,out,checkpoint_digest):
                 'model':model,'training':results,'evaluation':summarize(evaluated),'base_rollback_exact':True,
                 'teacher_selected':frozen_teacher is not None,'self_opd_run':'self_opd' in adapters,'native_calls':native_count,
                 'no_quantization':True,'promoted':False,'wall_seconds':time.monotonic()-start,
-                'scope':CONFIG['training_scope'],'quality_claim':'fresh held-out pilot only; no automatic capability or production promotion'}
+                'scope':CONFIG['training_scope'],'active_families':active_families,'retention_control_families':controls,'quality_claim':'fresh held-out pilot only; no automatic capability or production promotion'}
         native.dump(out/'RESULT.json',result);return result
     finally:release(trainer)
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--model',required=True,choices=native.MODELS)
     ap.add_argument('--suite',type=Path,required=True);ap.add_argument('--private',type=Path,required=True);ap.add_argument('--output',type=Path,required=True)
+    ap.add_argument('--calibration-from',type=Path);ap.add_argument('--allow-saturated-controls',action='store_true')
     a=ap.parse_args();a.output.parent.mkdir(parents=True,exist_ok=True)
     with open('/work/AI/experiments/strata-dev8-gpu.lock','a+') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -306,7 +327,7 @@ def main():
         torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False;torch.use_deterministic_algorithms(True)
         before=qualify.bind_checkpoint(a.model);foreign=qualify.gpu_processes()
         native.dump(a.output.with_suffix('.binding-before.json'),before);error=None;outcome=None;started=time.monotonic()
-        try:outcome=run(a.model,a.suite,a.private,a.output,digest(before))
+        try:outcome=run(a.model,a.suite,a.private,a.output,digest(before),a.calibration_from,a.allow_saturated_controls)
         except BaseException as ex:error=repr(ex);raise
         finally:
             release();after=qualify.bind_checkpoint(a.model);native.dump(a.output.with_suffix('.binding-after.json'),after)
