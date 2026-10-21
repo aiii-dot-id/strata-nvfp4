@@ -102,55 +102,64 @@ def qualify(model,output,*,tokens,targets,positions,expected_expert=None):
     native.dump(output/'NOMINATION.json',exposure)
     torch.manual_seed(61021);torch.cuda.manual_seed_all(61021)
     t=terminal.build_terminal(cp,model,expert,device='cuda')
-    buffers=tensors_digest(t.named_buffers())
-    def export(path):return terminal.save_adapter(t,path,cp,checkpoint_sha256=binding)
-    zero=output/'zero.adapter';export(zero)
-    native.run(model,tokens,output/'native-zero',capture=True,adapter=zero,timeout=600)
-    native.exact_native(baseline,output/'native-zero')
-    original_logits=np.memmap(baseline/'logits.f32',dtype='<f4',mode='r').reshape(-1,157184)
-    with torch.no_grad():initial=t(features).cpu().numpy()
-    forward=compare_logits(initial,original_logits[positions])
-    native.dump(output/'FORWARD.json',forward)
-    if not forward['passed']:raise ValueError('initial trainer-native forward gate failed')
-    opt=torch.optim.Adam(t.parameters(),lr=.001,foreach=False)
-    conf={'model':model,'expert':expert,'rank':8,'alpha':16,'optimizer':'Adam','lr':.001,'checkpoint_sha256':binding,'torch':torch.__version__}
-    datahash=hashlib.sha256(json.dumps({'capture':capture.data_hash,'targets':targets,'positions':positions},sort_keys=True).encode()).hexdigest()
-    steps=[]
-    for i in range(3):
-        steps.append(step(t,opt,features,target))
-        if i==0:terminal.save_training_state(t,opt,output/'snapshot-step1',step=1,iteration_cursor=1,data_hash=datahash,config_binding=conf)
-    with torch.no_grad():trained_logits=t(features).cpu().numpy();after_loss=float(torch.nn.functional.cross_entropy(t(features),target))
-    if after_loss>=steps[0]['loss']:raise ValueError('training loss did not reduce')
-    if tensors_digest(t.named_parameters())==steps[0]['adapter']:raise ValueError('no continued adapter update')
-    if buffers!=tensors_digest(t.named_buffers()):raise ValueError('frozen tensor changed')
-    trained=output/'trained.adapter';export(trained)
-    end_params=copy.deepcopy(dict(t.named_parameters()));end_opt=copy.deepcopy(opt.state_dict())
-    end_rng=torch.get_rng_state().clone();end_cuda=[x.clone() for x in torch.cuda.get_rng_state_all()]
-    restored=terminal.restore_training_state(t,opt,output/'snapshot-step1',data_hash=datahash,config_binding=conf)
-    resumed=[step(t,opt,features,target),step(t,opt,features,target)]
-    tree_exact(dict(t.named_parameters()),end_params);tree_exact(opt.state_dict(),end_opt)
-    tree_exact(torch.get_rng_state(),end_rng);tree_exact(torch.cuda.get_rng_state_all(),end_cuda)
-    tree_exact(resumed,steps[1:])
-    export(output/'resumed.adapter')
-    if native.sha(trained)!=native.sha(output/'resumed.adapter'):raise ValueError('resumed binary differs')
-    # Mutate research parameters, reload the export, then compare actual values/logits.
-    with torch.no_grad():
-        for p in t.parameters():p.zero_()
-    terminal.load_adapter(t,trained,checkpoint_sha256=binding)
-    tree_exact(dict(t.named_parameters()),end_params)
-    with torch.no_grad():tree_exact(t(features).cpu(),torch.from_numpy(trained_logits))
-    native.run(model,tokens,output/'native-trained',capture=True,adapter=trained,timeout=600)
-    native_trained=np.memmap(output/'native-trained'/'logits.f32',dtype='<f4',mode='r').reshape(-1,157184)
-    adapted=compare_logits(trained_logits,native_trained[positions])
-    native.dump(output/'ADAPTED-FORWARD.json',adapted)
-    if not adapted['passed']:raise ValueError('adapted trainer-native forward gate failed')
-    native.run(model,tokens,output/'native-rollback',capture=True,timeout=600)
-    exact=native.exact_native(baseline,output/'native-rollback')
-    if buffers!=tensors_digest(t.named_buffers()):raise ValueError('frozen tensor changed')
-    summary={'passed':True,'model':model,'scope':'one terminal expert adapter; no base weights updated','expert':expert,'trainable_parameters':sum(p.numel() for p in t.parameters()),'exposure':exposure,'forward':forward,'adapted_forward':adapted,'initial_loss':steps[0]['loss'],'final_loss':after_loss,'steps':steps,'resumed_steps':resumed,'export_reload_exact':True,'training_state_restore_exact':True,'optimizer_and_rng_exact':True,'rollback_exact':exact,'base_buffers_unchanged':True}
-    native.dump(output/'RESULT.json',summary)
-    del t,opt,features,target,end_params,end_opt;gc.collect();torch.cuda.empty_cache()
-    return summary
+    def native_stage(path,adapter=None):
+        nonlocal features,target
+        t.cpu();features=features.cpu();target=target.cpu();gc.collect();torch.cuda.empty_cache()
+        result=native.run(model,tokens,path,capture=True,adapter=adapter,timeout=600)
+        t.cuda();features=features.cuda();target=target.cuda()
+        return result
+    try:
+        buffers=tensors_digest(t.named_buffers())
+        def export(path):return terminal.save_adapter(t,path,cp,checkpoint_sha256=binding)
+        zero=output/'zero.adapter';export(zero)
+        native_stage(output/'native-zero',zero)
+        native.exact_native(baseline,output/'native-zero')
+        original_logits=np.memmap(baseline/'logits.f32',dtype='<f4',mode='r').reshape(-1,157184)
+        with torch.no_grad():initial=t(features).cpu().numpy()
+        forward=compare_logits(initial,original_logits[positions])
+        native.dump(output/'FORWARD.json',forward)
+        if not forward['passed']:raise ValueError('initial trainer-native forward gate failed')
+        opt=torch.optim.Adam(t.parameters(),lr=.001,foreach=False)
+        conf={'model':model,'expert':expert,'rank':8,'alpha':16,'optimizer':'Adam','lr':.001,'checkpoint_sha256':binding,'torch':torch.__version__}
+        datahash=hashlib.sha256(json.dumps({'capture':capture.data_hash,'targets':targets,'positions':positions},sort_keys=True).encode()).hexdigest()
+        steps=[]
+        for i in range(3):
+            steps.append(step(t,opt,features,target))
+            if i==0:terminal.save_training_state(t,opt,output/'snapshot-step1',step=1,iteration_cursor=1,data_hash=datahash,config_binding=conf)
+        with torch.no_grad():trained_logits=t(features).cpu().numpy();after_loss=float(torch.nn.functional.cross_entropy(t(features),target))
+        if after_loss>=steps[0]['loss']:raise ValueError('training loss did not reduce')
+        if tensors_digest(t.named_parameters())==steps[0]['adapter']:raise ValueError('no continued adapter update')
+        if buffers!=tensors_digest(t.named_buffers()):raise ValueError('frozen tensor changed')
+        trained=output/'trained.adapter';export(trained)
+        end_params=copy.deepcopy(dict(t.named_parameters()));end_opt=copy.deepcopy(opt.state_dict())
+        end_rng=torch.get_rng_state().clone();end_cuda=[x.clone() for x in torch.cuda.get_rng_state_all()]
+        restored=terminal.restore_training_state(t,opt,output/'snapshot-step1',data_hash=datahash,config_binding=conf)
+        resumed=[step(t,opt,features,target),step(t,opt,features,target)]
+        tree_exact(dict(t.named_parameters()),end_params);tree_exact(opt.state_dict(),end_opt)
+        tree_exact(torch.get_rng_state(),end_rng);tree_exact(torch.cuda.get_rng_state_all(),end_cuda)
+        tree_exact(resumed,steps[1:])
+        export(output/'resumed.adapter')
+        if native.sha(trained)!=native.sha(output/'resumed.adapter'):raise ValueError('resumed binary differs')
+        # Mutate research parameters, reload the export, then compare actual values/logits.
+        with torch.no_grad():
+            for p in t.parameters():p.zero_()
+        terminal.load_adapter(t,trained,checkpoint_sha256=binding)
+        tree_exact(dict(t.named_parameters()),end_params)
+        with torch.no_grad():tree_exact(t(features).cpu(),torch.from_numpy(trained_logits))
+        native_stage(output/'native-trained',trained)
+        native_trained=np.memmap(output/'native-trained'/'logits.f32',dtype='<f4',mode='r').reshape(-1,157184)
+        adapted=compare_logits(trained_logits,native_trained[positions])
+        native.dump(output/'ADAPTED-FORWARD.json',adapted)
+        if not adapted['passed']:raise ValueError('adapted trainer-native forward gate failed')
+        native_stage(output/'native-rollback')
+        exact=native.exact_native(baseline,output/'native-rollback')
+        if buffers!=tensors_digest(t.named_buffers()):raise ValueError('frozen tensor changed')
+        summary={'passed':True,'model':model,'scope':'one terminal expert adapter; no base weights updated','expert':expert,'trainable_parameters':sum(p.numel() for p in t.parameters()),'exposure':exposure,'forward':forward,'adapted_forward':adapted,'initial_loss':steps[0]['loss'],'final_loss':after_loss,'steps':steps,'resumed_steps':resumed,'export_reload_exact':True,'training_state_restore_exact':True,'optimizer_and_rng_exact':True,'rollback_exact':exact,'base_buffers_unchanged':True}
+        native.dump(output/'RESULT.json',summary)
+        del opt,end_params,end_opt;gc.collect();torch.cuda.empty_cache()
+        return summary
+    finally:
+        t.cpu();features=features.cpu();target=target.cpu();gc.collect();torch.cuda.empty_cache()
 
 
 def main():
