@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -24,6 +25,7 @@
 #include <strata/ring/numerics.hpp>
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
+#include <strata/ring/terminal_adapter.hpp>
 #include <vector>
 #ifdef STRATA_TORCH_ROUTER
 #include "attention.hpp"
@@ -410,6 +412,8 @@ int main(int argc, char **argv) {
     std::filesystem::path state_in, state_out;
     size_t stop_after = std::numeric_limits<size_t>::max();
     std::string state_binding;
+    bool terminal_capture = false;
+    std::filesystem::path terminal_adapter_path;
     std::vector<std::string> options;
     for (int i = 7; i < argc; i += 2) {
       const std::string option = argv[i];
@@ -447,6 +451,8 @@ int main(int argc, char **argv) {
       else if (option == "--state-out") state_out = argv[i + 1];
       else if (option == "--stop-after") stop_after = sr::unsigned_decimal(argv[i + 1]);
       else if (option == "--state-binding") state_binding = argv[i + 1];
+      else if (option == "--terminal-capture") { const std::string v = argv[i + 1]; if (v != "0" && v != "1") throw std::invalid_argument("terminal-capture must be 0 or 1"); terminal_capture = v == "1"; }
+      else if (option == "--terminal-adapter") terminal_adapter_path = argv[i + 1];
       else
         throw std::invalid_argument("unknown option");
     }
@@ -476,6 +482,8 @@ int main(int argc, char **argv) {
       throw std::invalid_argument("continuation requires exact lowercase hex state binding");
     if (continuation_mode && (has_route_probe || logits_mode != "all"))
       throw std::invalid_argument("continuation requires all logits and no route probe");
+    if (!terminal_adapter_path.empty() && continuation_mode)
+      throw std::invalid_argument("terminal adapter is incompatible with continuation mode");
     if (stop_after != std::numeric_limits<size_t>::max() && state_out.empty())
       throw std::invalid_argument("stop-after requires state-out");
     sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3], 157184),
@@ -493,6 +501,8 @@ int main(int argc, char **argv) {
     shape(lm_head, {157184, 2048});
     if (lm_head.dtype != "BF16")
       throw std::runtime_error("original BF16 lm_head required");
+    std::optional<sr::TerminalAdapter> terminal_adapter;
+    if (!terminal_adapter_path.empty()) terminal_adapter = sr::TerminalAdapter::load(terminal_adapter_path.string(), 2, 2048, 256);
     check(cudaSetDevice(0));
     cudaDeviceProp props{};
     check(cudaGetDeviceProperties(&props, 0));
@@ -594,6 +604,7 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(output);
     std::ofstream routes(output / "routes.tsv");
     routes << std::setprecision(9);
+    size_t terminal_rows = 0;
     const auto start = std::chrono::steady_clock::now();
     bool route_probe_found = false;
     auto apply_norm = [&](const std::vector<float> &x, const sr::TensorView &weight) {
@@ -697,6 +708,7 @@ int main(int argc, char **argv) {
         }
         add(h, projected);
         if (capture_operator) probe_stages["post_attention_hidden"] = h;
+        const auto post_attention_hidden = h;
         auto x = apply_norm(h, store.tensor(pre + "post_attention_layernorm.weight"));
         if (capture_operator) probe_stages["gate_input"] = x;
         if (layer == 0) {
@@ -741,6 +753,7 @@ int main(int argc, char **argv) {
             probe_selected = selected;
           }
           std::vector<float> mixed(2048, 0), expert_outputs;
+          std::vector<float> terminal_g, terminal_u, terminal_y;
           if (pointwise_backend == PointwiseBackend::TorchCuda)
             expert_outputs.reserve(8 * 2048);
           routes << pos << '\t' << layer;
@@ -759,8 +772,18 @@ int main(int argc, char **argv) {
             constexpr size_t count = 512 * 2048;
             auto g = mv.apply_device(w, 512, 2048, x);
             auto u = mv.apply_device(w + count, 512, 2048, x);
-            auto y = mv.apply_device(w + 2 * count, 2048, 512,
-                                     apply_swiglu(std::move(g), u));
+            const auto original_g = g, original_u = u;
+            const bool adapt = terminal_adapter && layer == 19 && expert == terminal_adapter->expert;
+            if (adapt) terminal_adapter->add_gate_up(x, g, u);
+            auto act = apply_swiglu(std::move(g), u);
+            auto y = mv.apply_device(w + 2 * count, 2048, 512, act);
+            if (adapt) terminal_adapter->add_down(act, y);
+            if (layer == 19) {
+              auto original_y = mv.apply_device(w + 2 * count, 2048, 512, apply_swiglu(original_g, original_u));
+              terminal_g.insert(terminal_g.end(), original_g.begin(), original_g.end());
+              terminal_u.insert(terminal_u.end(), original_u.begin(), original_u.end());
+              terminal_y.insert(terminal_y.end(), original_y.begin(), original_y.end());
+            }
             if (pointwise_backend == PointwiseBackend::TorchCuda)
               expert_outputs.insert(expert_outputs.end(), y.begin(), y.end());
             else
@@ -776,13 +799,30 @@ int main(int argc, char **argv) {
 #endif
           }
           routes << '\n';
-          if (pointwise_backend == PointwiseBackend::Native)
-            add(mixed, mlp(mv, store, pre + "mlp.shared_experts.", x));
-          else {
+          std::vector<float> shared;
+          if (pointwise_backend == PointwiseBackend::Native) {
+            shared = mlp(mv, store, pre + "mlp.shared_experts.", x);
+            add(mixed, shared);
+          } else {
             auto shared_gate = mv.apply(store.tensor(pre + "mlp.shared_experts.gate_proj.weight"), x);
             auto shared_up = mv.apply(store.tensor(pre + "mlp.shared_experts.up_proj.weight"), x);
-            add(mixed, mv.apply(store.tensor(pre + "mlp.shared_experts.down_proj.weight"),
-                                apply_swiglu(std::move(shared_gate), shared_up)));
+            auto shared_act = apply_swiglu(std::move(shared_gate), shared_up);
+            shared = mv.apply(store.tensor(pre + "mlp.shared_experts.down_proj.weight"), shared_act);
+            add(mixed, shared);
+          }
+          if (layer == 19 && (terminal_capture || terminal_adapter)) {
+            std::vector<float> row;
+            row.reserve(30736);
+            row.insert(row.end(), x.begin(), x.end());
+            row.insert(row.end(), post_attention_hidden.begin(), post_attention_hidden.end());
+            row.insert(row.end(), shared.begin(), shared.end());
+            for (size_t i = 0; i < 8; ++i) row.push_back(static_cast<float>(selected.expert_ids[i]));
+            row.insert(row.end(), selected.weights.begin(), selected.weights.end());
+            row.insert(row.end(), terminal_g.begin(), terminal_g.end());
+            row.insert(row.end(), terminal_u.begin(), terminal_u.end());
+            row.insert(row.end(), terminal_y.begin(), terminal_y.end());
+            if (row.size() != 30736) throw std::runtime_error("terminal capture row geometry");
+            write_row(output / "terminal.f32", row); ++terminal_rows;
           }
           add(h, mixed);
         }
@@ -856,6 +896,16 @@ int main(int argc, char **argv) {
     routes.flush();
     if (!routes)
       throw std::runtime_error("route trace write failed");
+    if (terminal_capture || terminal_adapter) {
+      std::ofstream meta(output / "terminal-meta.json");
+      meta << "{\"schema\":\"strata-terminal-v1\",\"model\":\"ring\",\"hidden\":2048,\"intermediate\":512,\"topk\":8,\"rows\":" << terminal_rows
+           << ",\"rowfloats\":30736,\"layout\":\"x,residual,shared_mlp,ids[8],weights[8],originalg[8,512],originalu[8,512],originaly[8,2048]\",\"adapterpath\":"
+           << "null"
+           << ",\"expert\":" << (terminal_adapter ? std::to_string(terminal_adapter->expert) : "null")
+           << ",\"rank\":" << (terminal_adapter ? std::to_string(terminal_adapter->rank) : "null")
+           << ",\"alpha\":" << (terminal_adapter ? std::to_string(terminal_adapter->alpha) : "null") << "}\n";
+      if (!meta) throw std::runtime_error("terminal metadata write failed");
+    }
     std::ostringstream token_json;
     token_json << '[';
     for (size_t i = 0; i < (continuation_mode ? processed_position : tokens.size()); ++i) {
@@ -890,6 +940,8 @@ int main(int argc, char **argv) {
             << ",\"attention_score_scale\":\"" << attention_scale << "\""
             << ",\"attention_backend\":\"" << attention_backend_name(attention_backend) << "\""
             << ",\"pointwise_backend\":\"" << pointwise_backend_name(pointwise_backend) << "\""
+            << ",\"terminal_capture\":" << (terminal_capture ? "true" : "false")
+            << ",\"terminal_adapter\":" << (terminal_adapter ? "true" : "false")
             << ",\"matmul_backend\":\""
             << matmul_backend_name(matmul_backend)
             << "\",\"lm_head_residency\":\"" << lm_head_residency_name(lm_head_residency)

@@ -25,6 +25,7 @@
 #include <strata/ring/numerics.hpp>
 #include <strata/ring/routing.hpp>
 #include <strata/ring/tensor_store.hpp>
+#include <strata/ring/terminal_adapter.hpp>
 #include <vector>
 #include <map>
 #ifdef STRATA_LING_TORCH_OPS
@@ -501,6 +502,7 @@ int main(int argc,char **argv) {
     size_t generate=0; std::vector<int> eos; std::optional<RouteProbe> route_probe;
     std::optional<std::filesystem::path> state_in, state_out;
     std::optional<size_t> stop_after; std::string state_binding;
+    bool terminal_capture = false; std::filesystem::path terminal_adapter_path;
     sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
     sl::RmsMode rms_mode=sl::RmsMode::Native;
     std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; LmHeadResidency lm_head_residency=LmHeadResidency::Off; std::vector<std::string> options;
@@ -515,6 +517,8 @@ int main(int argc,char **argv) {
       else if(option=="--state-out") state_out=argv[i+1];
       else if(option=="--stop-after") stop_after=sr::unsigned_decimal(argv[i+1]);
       else if(option=="--state-binding") state_binding=argv[i+1];
+      else if(option=="--terminal-capture") { const std::string v=argv[i+1]; if(v!="0" && v!="1") throw std::invalid_argument("terminal-capture must be 0 or 1"); terminal_capture=v=="1"; }
+      else if(option=="--terminal-adapter") terminal_adapter_path=argv[i+1];
       else if(option=="--matmul") { matmul_name=argv[i+1]; matmul_backend=parse_matmul_backend(matmul_name); }
       else if(option=="--lm-head-residency") lm_head_residency=parse_lm_head_residency(argv[i+1]);
       else if(option=="--rope-frequency") {
@@ -545,6 +549,8 @@ int main(int argc,char **argv) {
     if (stop_after && !state_out) throw std::invalid_argument("stop-after requires state-out");
     if (route_probe && continuation_mode)
       throw std::invalid_argument("route probe is incompatible with continuation mode");
+    if (!terminal_adapter_path.empty() && continuation_mode)
+      throw std::invalid_argument("terminal adapter is incompatible with continuation mode");
     const size_t cache_mib=sr::unsigned_decimal(argv[5]);
     if(cache_mib<5 || cache_mib>2048) throw std::runtime_error("cache budget must be 5..2048 MiB");
     const std::string identity=argv[6];
@@ -558,6 +564,8 @@ int main(int argc,char **argv) {
     const auto &lm_head=store.tensor("lm_head.weight");
     shape(lm_head,{157184,1536});
     if(lm_head.dtype!="BF16") throw std::runtime_error("original BF16 lm_head required");
+    std::optional<sr::TerminalAdapter> terminal_adapter;
+    if (!terminal_adapter_path.empty()) terminal_adapter=sr::TerminalAdapter::load(terminal_adapter_path.string(),1,1536,128);
     check(cudaSetDevice(0));
     cudaDeviceProp props{}; check(cudaGetDeviceProperties(&props,0));
     if(props.major!=8 || props.minor!=9) throw std::runtime_error("this target is qualified only for sm_89");
@@ -625,6 +633,7 @@ int main(int argc,char **argv) {
     bool probe_captured=false;
     std::filesystem::create_directories(output);
     std::ofstream routes(output/"routes.tsv"); routes<<std::setprecision(9);
+    size_t terminal_rows=0;
     const auto start=std::chrono::steady_clock::now();
     size_t processed_position = start_position;
     std::vector<float> last_committed_logits;
@@ -686,6 +695,7 @@ int main(int argc,char **argv) {
             probe_captured=true;
           }
           std::vector<float> mixed(1536,0); std::vector<std::vector<float>> expert_outputs; routes<<pos<<'\t'<<layer;
+          std::vector<float> terminal_g, terminal_u, terminal_y;
           expert_outputs.reserve(8);
           for(size_t j=0;j<8;++j) {
             auto expert=selected.expert_ids[j];routes<<'\t'<<expert<<':'<<selected.weights[j];
@@ -696,11 +706,26 @@ int main(int argc,char **argv) {
             const auto *w=static_cast<const uint16_t *>(device->weights.p);
             constexpr size_t count=512*1536;
             auto g=mv.apply_device(w,512,1536,x);auto u=mv.apply_device(w+count,512,1536,x);
-            auto y=mv.apply_device(w+2*count,1536,512,swiglu(std::move(g),u
+            const auto original_g=g, original_u=u;
+            const bool adapt=terminal_adapter && layer==23 && expert==terminal_adapter->expert;
+            if(adapt) terminal_adapter->add_gate_up(x,g,u);
+            auto act=swiglu(std::move(g),u
+#ifdef STRATA_LING_TORCH_OPS
+                                                               , torch_ops.get()
+#endif
+                                                               );
+            auto y=mv.apply_device(w+2*count,1536,512,act);
+            if(adapt) terminal_adapter->add_down(act,y);
+            if(layer==23) {
+              auto original_y=mv.apply_device(w+2*count,1536,512,swiglu(original_g,original_u
 #ifdef STRATA_LING_TORCH_OPS
                                                                , torch_ops.get()
 #endif
                                                                ));
+              terminal_g.insert(terminal_g.end(),original_g.begin(),original_g.end());
+              terminal_u.insert(terminal_u.end(),original_u.begin(),original_u.end());
+              terminal_y.insert(terminal_y.end(),original_y.begin(),original_y.end());
+            }
 #ifdef STRATA_LING_TORCH_OPS
             if (torch_ops) expert_outputs.push_back(std::move(y));
             else
@@ -710,11 +735,21 @@ int main(int argc,char **argv) {
 #ifdef STRATA_LING_TORCH_OPS
           if (torch_ops) { std::string error; if (!torch_ops->weighted_sum(expert_outputs, selected.weights, mixed, error)) throw std::runtime_error(error); }
 #endif
-          routes<<'\n';add(mixed,mlp(mv,store,pre+"mlp.shared_experts.",x
+          routes<<'\n'; auto shared=mlp(mv,store,pre+"mlp.shared_experts.",x
 #ifdef STRATA_LING_TORCH_OPS
                                       , torch_ops.get()
 #endif
-                                      ));add(h,mixed);
+                                      ); add(mixed,shared); add(h,mixed);
+          if(layer==23 && (terminal_capture || terminal_adapter)) {
+            std::vector<float> row; row.reserve(25104);
+            row.insert(row.end(),x.begin(),x.end()); row.insert(row.end(),post_attention_hidden.begin(),post_attention_hidden.end());
+            row.insert(row.end(),shared.begin(),shared.end());
+            for(size_t i=0;i<8;++i) row.push_back(static_cast<float>(selected.expert_ids[i]));
+            row.insert(row.end(),selected.weights.begin(),selected.weights.end());
+            row.insert(row.end(),terminal_g.begin(),terminal_g.end()); row.insert(row.end(),terminal_u.begin(),terminal_u.end()); row.insert(row.end(),terminal_y.begin(),terminal_y.end());
+            if(row.size()!=25104) throw std::runtime_error("terminal capture row geometry");
+            write_row(output/"terminal.f32",row); ++terminal_rows;
+          }
         }
         write_row(output/("layer-"+std::to_string(layer)+".f32"),h);
       }
@@ -767,6 +802,14 @@ int main(int argc,char **argv) {
       if (!sidecar) throw std::runtime_error("continuation sidecar write failed");
     }
     auto stats=cache.stats(); routes.flush();
+    if (terminal_capture || terminal_adapter) {
+      std::ofstream meta(output/"terminal-meta.json");
+      meta << "{\"schema\":\"strata-terminal-v1\",\"model\":\"ling\",\"hidden\":1536,\"intermediate\":512,\"topk\":8,\"rows\":" << terminal_rows
+           << ",\"rowfloats\":25104,\"layout\":\"x,residual,shared_mlp,ids[8],weights[8],originalg[8,512],originalu[8,512],originaly[8,1536]\",\"adapterpath\":null,\"expert\":"
+           << (terminal_adapter ? std::to_string(terminal_adapter->expert) : "null")
+           << ",\"rank\":" << (terminal_adapter ? std::to_string(terminal_adapter->rank) : "null")
+           << ",\"alpha\":" << (terminal_adapter ? std::to_string(terminal_adapter->alpha) : "null") << "}\n";
+    }
     if(route_probe) {
       if(!probe_captured) throw std::runtime_error("route probe position was not evaluated");
       write_route_probe(output/"route-probe.json",*route_probe,probe_input_hidden,
@@ -805,6 +848,8 @@ int main(int argc,char **argv) {
       <<",\"host_attention_state_live_logical_bytes\":"<<host_attention_state_live_logical_bytes
       <<",\"host_attention_state_capacity_logical_bytes\":"<<host_attention_state_capacity_logical_bytes
       <<",\"host_attention_state_payload_scope\":\"logical float payload: MLA key/value slots plus KDA recurrent and convolution state; excludes vector allocator capacity/overhead and temporary buffers\""
+      <<",\"terminal_capture\":" << (terminal_capture ? "true" : "false")
+      <<",\"terminal_adapter\":" << (terminal_adapter ? "true" : "false")
       <<",\"matmul_backend\":\""<<matmul_backend_name(matmul_backend)<<"\",\"lm_head_residency\":\""<<lm_head_residency_name(lm_head_residency)<<"\",\"lm_head_resident_bytes\":"<<mv.resident_lm_head_bytes()<<",\"lm_head_resident_uploads\":"<<mv.resident_lm_head_uploads()<<",\"lm_head_resident_apply_calls\":"<<mv.resident_lm_head_apply_calls()<<",\"matmul_fp32_weight_scratch_bytes\":"<<Matvec::fp32_scratch_bytes(matmul_backend)<<",\"cache_hits\":"<<stats.hits<<",\"cache_misses\":"<<stats.misses<<",\"cache_evictions\":"<<stats.evictions
       <<",\"workspace_bytes\":"<<Matvec::workspace_bytes(matmul_backend)<<",\"wall_seconds\":"
       <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"}\n";
