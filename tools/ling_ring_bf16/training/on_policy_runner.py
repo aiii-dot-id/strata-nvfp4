@@ -11,15 +11,16 @@ import native, terminal, qualify, on_policy_losses as losses, on_policy_tasks as
 from transformers import AutoTokenizer
 
 EXP=Path('/work/AI/experiments/strata-on-policy-20261021-r1')
-ARMS=('self_opd','rlvr')
+ARMS=('rlvr','self_opd')
 CONFIG={'schema':'strata-on-policy-qualification-v1','rounds':2,'samples_per_prompt':4,
         'temperature':1.,'max_new_tokens':32,'lr':0.001,'rank':8,'alpha':16,
         'init_seed':61021,'rollout_seed':41021,'eval_seed':41022,
         'max_rlvr_batches_per_round':3,'native_timeout_seconds':300,
         'max_job_seconds':14400,'trainable_scope':'one final-layer expert gate/up/down LoRA',
-        'self_opd':'mean full-vocabulary reverse KL at fresh student-sampled prefixes; frozen same-base teacher conditioned on verified reference; fixed-prefix semi-gradient',
+        'self_opd':'mean full-vocabulary reverse KL at fresh student-sampled prefixes; frozen RLVR-trained endpoint of same base as teacher; identical original prompt; fixed-prefix semi-gradient',
         'rlvr':'negative mean leave-one-out advantage times sequence-summed sampled log probability; one update per freshly collected round',
         'restore_audit':'replay second batch only to compare uninterrupted and restored state; not another on-policy update',
+        'teacher':'RLVR endpoint frozen before new zero-adapter Self-OPD student; no reference-answer augmentation',
         'evaluation':'paired seeds and equal answer-only token allowance; 8 held-out and 4 retention tasks, after both candidate freezes',
         'non_claims':['not full-model training','not a broad capability benchmark','not a matched training-cost comparison if RLVR needs extra groups','no promotion'],
         'quantization':False}
@@ -51,6 +52,17 @@ def response_rows(prompt,generated,n):
     rows=list(range(len(prompt)-1,len(prompt)-1+len(generated)))
     if not generated or rows[-1]!=n-1:raise ValueError('response-token alignment')
     return rows
+
+
+def teacher_input(tok,model,record,adapter,expected_sha):
+    if adapter is None or native.sha(adapter)!=expected_sha:raise ValueError('frozen teacher changed')
+    teacher_prompt,meta=prompt_ids(tok,model,tasks.prompt(record['task_object']))
+    if teacher_prompt!=record['prompt_ids'] or meta['privileged_reference']:raise ValueError('teacher/student prompt mismatch')
+    generated=record['ids']
+    if not generated or any(type(x)is not int or not 0<=x<157184 for x in generated):raise ValueError('invalid sampled prefix')
+    full=teacher_prompt+generated[:-1]
+    rows=response_rows(teacher_prompt,generated,len(full))
+    return full,rows,teacher_prompt,meta
 
 def release(t=None):
     if t is not None:t.cpu()
@@ -173,6 +185,12 @@ def run(model,suite_path,out,*,parent_checkpoint_digest):
             t.cuda();opt=torch.optim.Adam(t.parameters(),lr=CONFIG['lr'],foreach=False)
             conf=dict(CONFIG,objective=arm,model=model,expert=expert,manifest_sha256=manifest,suite_sha256=pins['suite'],source_sha256=digest(pins['source_closure']),executable_sha256=pins['executable'],native_profile=c['profile'],parent_checkpoint_digest=parent_checkpoint_digest,initial_adapter_sha256=native.sha(zero))
             steps=[];current=zero;records=None
+            teacher_adapter=adapters.get('rlvr') if arm=='self_opd' else None
+            if arm=='self_opd':
+                if teacher_adapter is None:raise ValueError('Self-OPD requires qualified RLVR endpoint')
+                conf['teacher_adapter_sha256']=native.sha(teacher_adapter)
+                if conf['teacher_adapter_sha256']!=results['rlvr']['adapter_sha256']:raise ValueError('teacher endpoint drift')
+                native.dump(out/'FROZEN-TEACHER.json',{'method':'Self-OPD(RLVR)','adapter':str(teacher_adapter),'adapter_sha256':native.sha(teacher_adapter),'metadata_sha256':native.sha(str(teacher_adapter)+'.json'),'same_base_manifest':manifest,'same_original_prompt':True,'reference_augmentation':False,'before_student_updates':True})
             for roundno in range(CONFIG['rounds']):
                 records=[dict(r) for r in initial_records] if roundno==0 else collect(arm,roundno,current)
                 # Round zero is on both policies because zero-adapter equality was proved.
@@ -185,11 +203,10 @@ def run(model,suite_path,out,*,parent_checkpoint_digest):
                     if not informative(records):raise RuntimeError('RLVR non-informative after declared fresh rollout budget; no update or qualification claimed')
                 if arm=='self_opd':
                     for i,r in enumerate(records):
-                        teacher_prompt,tm=prompt_ids(tok,model,tasks.prompt(r['task_object']),tasks.reference(r['task_object']))
-                        full=teacher_prompt+r['ids'][:-1];rows=response_rows(teacher_prompt,r['ids'],len(full))
-                        d,rec=native_stage(f'teacher/round-{roundno}/{i}',full,capture=False)
+                        full,rows,teacher_prompt,tm=teacher_input(tok,model,r,teacher_adapter,conf['teacher_adapter_sha256'])
+                        d,rec=native_stage(f'teacher/round-{roundno}/{i}',full,capture=False,adapter=teacher_adapter)
                         r['teacher']=np.array(np.memmap(d/'logits.f32',dtype='<f4',mode='r').reshape(-1,157184)[rows],copy=True)
-                        native.dump(d/'ALIGNMENT.json',{'student_rollout':r['receipt'],'student_ids':r['ids'],'teacher_rows':rows,'teacher_prompt_ids':teacher_prompt,'teacher_prompt_contract':tm,'teacher_adapter':None,'frozen_teacher':True})
+                        native.dump(d/'ALIGNMENT.json',{'student_rollout':r['receipt'],'student_ids':r['ids'],'teacher_rows':rows,'teacher_prompt_ids':teacher_prompt,'teacher_prompt_contract':tm,'teacher_adapter':str(teacher_adapter),'teacher_adapter_sha256':native.sha(teacher_adapter),'frozen_teacher':True,'teacher_method':'RLVR','reference_augmentation':False})
                         compact(d,rows)
                 batch_binding=digest([{'receipt':native.sha(r['path']/'ROLLOUT.json'),'policy':r['policy_adapter_sha256'],'seed':r['seed'],'ids':r['ids'],'retained_payloads':native.sha(r['path']/'RETENTION.json'),'teacher_logits_sha256':hashlib.sha256(r['teacher'].tobytes()).hexdigest() if 'teacher' in r else None} for r in records])
                 native.dump(out/f'{arm}-round-{roundno}-BATCH.json',{'current_adapter':native.sha(current),'fresh_prefixes_after_previous_update':roundno>0,'zero_policy_equivalence_audit':roundno==0,'batch_sha256':batch_binding,'records':[str(r['path']/'ROLLOUT.json') for r in records]})

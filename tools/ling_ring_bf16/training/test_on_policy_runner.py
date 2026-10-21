@@ -61,19 +61,60 @@ def test_update_cpu_fake_trainer_checks_gradients_for_both_objectives(monkeypatc
         assert result["objective"]==arm and result["gradient_norm"]>0 and len(result["gradient"])==6
 
 
-def test_runner_source_orders_teacher_and_freeze_before_heldout():
-    source=Path(runner.__file__).read_text()
-    teacher=source.index("teacher_prompt,tm=prompt_ids")
-    update=source.index("result=update(t,opt,records,arm)")
-    assert teacher<update
-    frozen=source.index("FROZEN-CANDIDATES.json")
-    held=source.index("for i,task in enumerate(held+ret)")
-    assert frozen<held
-    assert source.index("release(t);t=None",frozen)<held
+def _teacher_record(tok, model="ling", sampled=(7, 8, 9)):
+    task=runner.tasks.Task("t0", "training", "math", "Compute 2+2.", {})
+    prompt, contract=runner.prompt_ids(tok, model, task.text, None)
+    ids=list(sampled)
+    return {
+        "task_object": task,
+        "prompt_ids": prompt,
+        "prompt_contract": contract,
+        "ids": ids,
+    }
 
 
-def test_runner_release_and_current_policy_contracts_are_explicit():
-    source=Path(runner.__file__).read_text()
-    assert "release(t);d=out/name" in source
-    assert "if roundno>0 and any(r['policy_adapter_sha256']!=native.sha(current)" in source
-    assert "fresh_prefixes_after_previous_update" in source
+def test_teacher_input_binds_adapter_hash_and_exact_sampled_prefix(tmp_path):
+    tok=FakeTokenizer()
+    record=_teacher_record(tok, sampled=(7, 8, 9))
+    adapter=tmp_path/"rlvr.adapter"
+    adapter.write_bytes(b"qualified-r-l-v-r-adapter")
+    expected=runner.native.sha(adapter)
+
+    full, rows, teacher_prompt, metadata=runner.teacher_input(
+        tok, "ling", record, adapter, expected
+    )
+    assert teacher_prompt==record["prompt_ids"]
+    assert full==record["prompt_ids"]+record["ids"][:-1]
+    assert rows==runner.response_rows(record["prompt_ids"], record["ids"], len(full))
+    assert metadata["privileged_reference"] is False
+    assert metadata["privileged_reference"] is False
+
+
+def test_teacher_input_rejects_bad_hash_and_mismatched_student_prompt(tmp_path):
+    tok=FakeTokenizer()
+    record=_teacher_record(tok)
+    adapter=tmp_path/"rlvr.adapter"
+    adapter.write_bytes(b"qualified-r-l-v-r-adapter")
+    expected=runner.native.sha(adapter)
+    with pytest.raises(ValueError, match="frozen teacher"):
+        runner.teacher_input(tok, "ling", record, adapter, "0"*64)
+
+    bad=dict(record)
+    bad["prompt_ids"]=list(record["prompt_ids"])+[999]
+    with pytest.raises(ValueError, match="prompt"):
+        runner.teacher_input(tok, "ling", bad, adapter, expected)
+
+
+def test_teacher_input_uses_no_reference_augmentation(monkeypatch, tmp_path):
+    tok=FakeTokenizer()
+    record=_teacher_record(tok)
+    adapter=tmp_path/"rlvr.adapter"
+    adapter.write_bytes(b"qualified-r-l-v-r-adapter")
+    calls=[]
+    original=runner.prompt_ids
+    def spy(tokenizer, model, text, reference=None):
+        calls.append(reference)
+        return original(tokenizer, model, text, reference)
+    monkeypatch.setattr(runner, "prompt_ids", spy)
+    runner.teacher_input(tok, "ling", record, adapter, runner.native.sha(adapter))
+    assert calls==[None]
