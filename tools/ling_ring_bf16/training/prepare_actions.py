@@ -10,7 +10,7 @@ MODEL_VOCAB=157184
 RULES=(
     "Choose exactly one next action from: inspect path=<ABS>, read path=<ABS>, test path=<ABS>, repair path=<ABS>, setcwd path=<ABS>.",
     "Use only facts in the observed state. Paths must be absolute and under /workspace.",
-    "If cwd differs from target, setcwd to target before inspecting or changing files.",
+    "If target_kind is directory and cwd differs from target, setcwd to target before inspecting or changing files.",
     "If a target is missing and its parent is uninspected, inspect the parent before deciding how to repair it.",
     "After validation fails or observed content is stale, reread the target before testing or repairing it.",
     "Return exactly one action line; do not include reasoning or a prefix/suffix."
@@ -70,20 +70,30 @@ def main():
     if {x["split"] for x in cases}!={"train","dev","heldout"}: raise SystemExit("split set mismatch")
     expected={"train":16,"dev":8,"heldout":16}
     if {s:sum(c["split"]==s for c in cases) for s in expected} != expected: raise SystemExit("split counts mismatch")
+    if sum(c["family"]=="wrongcwd" and c["state"].get("target_kind")=="directory" for c in cases) != sum(c["family"]=="wrongcwd" for c in cases): raise SystemExit("wrongcwd target-kind declaration mismatch")
+    if any(c["family"]!="wrongcwd" and c["state"].get("target_kind")=="directory" for c in cases): raise SystemExit("file target incorrectly declared directory")
     out=[]; pins={}
     for model in ("ling","ring"):
         tok_dir=Path(args.tokenizer_dir)/TOKENIZER_NAMES[model]
         tok_path=tok_dir/"tokenizer.json"; config_path=tok_dir/"config.json"; gen_path=tok_dir/"generation_config.json"
-        tok=AutoTokenizer.from_pretrained(str(tok_dir),local_files_only=True)
+        tok=AutoTokenizer.from_pretrained(str(tok_dir),local_files_only=True,trust_remote_code=True,use_fast=True)
         cfg=json.loads(config_path.read_text())
         if len(tok)!=157153 or int(cfg.get("vocab_size",0))!=MODEL_VOCAB: raise SystemExit("tokenizer/model vocab sanity mismatch")
         pins[model]={"tokenizer": {"path":str(tok_path),"sha256":sha(tok_path),"bytes":tok_path.stat().st_size,"len":len(tok)},"config":{"path":str(config_path),"sha256":sha(config_path)},"generation_config":{"path":str(gen_path),"sha256":sha(gen_path)},"model_vocab_size":MODEL_VOCAB,"eos_token":tok.eos_token,"eos_id":tok.eos_token_id,"enable_thinking":False if model=="ling" else None,"chat_template_sha256":hashlib.sha256(tok.chat_template.encode()).hexdigest()}
-        if tok.eos_token_id is None: raise SystemExit("generation EOS missing")
+        generation=json.loads(gen_path.read_text())
+        declared=generation.get("eos_token_id"); source="generation_config.json"
+        if declared is None:
+            declared=cfg.get("eos_token_id"); source="config.json"
+        declared=[declared] if type(declared) is int else declared
+        if tok.eos_token_id is None or not isinstance(declared,list) or tok.eos_token_id not in declared: raise SystemExit("tokenizer EOS is absent from canonical EOS list")
+        pins[model]["eos_source"]=source
+        pins[model]["generation_config_eos_ids"]=declared
         out += [{"model":model,"record":prepare_case(tok,c,model)} for c in cases]
-    Path(args.output).write_text(json.dumps({"schema":"strata-corrected-action-prepared-v2","rules":RULES,"models":["ling","ring"],"records":out,"tokenizer_pins":pins},sort_keys=True,indent=2)+"\n")
+    max_prompt={model:max(r["record"]["prompt_length"] for r in out if r["model"]==model) for model in ("ling","ring")}
+    Path(args.output).write_text(json.dumps({"schema":"strata-corrected-action-prepared-v3","rules":RULES,"models":["ling","ring"],"records":out,"max_prompt_tokens":max_prompt,"tokenizer_pins":pins},sort_keys=True,indent=2)+"\n")
     retention=[]
     for model in ("ling","ring"):
-        tok=AutoTokenizer.from_pretrained(str(Path(args.tokenizer_dir)/TOKENIZER_NAMES[model]),local_files_only=True)
+        tok=AutoTokenizer.from_pretrained(str(Path(args.tokenizer_dir)/TOKENIZER_NAMES[model]),local_files_only=True,trust_remote_code=True,use_fast=True)
         for i,(prompt,answer) in enumerate(RETENTION):
             kwargs={"tokenize":False,"add_generation_prompt":True};
             if model=="ling": kwargs["enable_thinking"]=False
