@@ -59,9 +59,13 @@ def check_foreign(before):
 
 def compare_logits(actual,expected):
     a=np.asarray(actual,dtype=np.float32);b=np.asarray(expected,dtype=np.float32)
-    if a.shape!=b.shape or not np.isfinite(a).all() or not np.isfinite(b).all(): raise ValueError('logit shape/finiteness')
-    d=np.abs(a-b)
-    rec={'shape':list(a.shape),'max_abs':float(d.max()),'mean_abs':float(d.mean()),'argmax_equal':bool(np.array_equal(a.argmax(-1),b.argmax(-1))),'tolerance_pass':bool(np.all(d<=.001+.0001*np.abs(b)))}
+    if a.shape!=b.shape or a.ndim!=2 or not a.size or not np.isfinite(a).all() or not np.isfinite(b).all():raise ValueError('logit shape/finiteness')
+    maximum=0.;total=0.;tolerance=True
+    for start in range(0,len(a),8):
+        aa=a[start:start+8];bb=b[start:start+8];d=np.abs(aa-bb)
+        maximum=max(maximum,float(d.max()));total+=float(d.sum(dtype=np.float64))
+        tolerance=tolerance and bool(np.all(d<=.001+.0001*np.abs(bb)))
+    rec={'shape':list(a.shape),'max_abs':maximum,'mean_abs':total/a.size,'argmax_equal':bool(np.array_equal(a.argmax(-1),b.argmax(-1))),'tolerance_pass':tolerance}
     rec['passed']=rec['argmax_equal'] and rec['tolerance_pass']
     return rec
 

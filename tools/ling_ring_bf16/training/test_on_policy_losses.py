@@ -18,7 +18,7 @@ def test_self_opd_full_vocab_temperature_and_finite_difference():
 def test_self_opd_teacher_has_no_gradient_and_not_sampled_scalar():
     s=torch.tensor([[1.,0.,-1.]],requires_grad=True); q=torch.tensor([[0.,2.,-2.]],requires_grad=True)
     loss,metrics=self_opd(s,q,1.0); expected=(torch.softmax(s,-1)*(torch.log_softmax(s,-1)-torch.log_softmax(q,-1))).sum()
-    assert torch.allclose(loss,expected); loss.backward(); assert q.grad is None; assert metrics["teacher_detached"]
+    assert torch.allclose(loss,expected.double()); loss.backward(); assert q.grad is None; assert metrics["teacher_detached"]
     assert s.grad is not None and torch.count_nonzero(s.grad)==3
 
 
@@ -94,3 +94,23 @@ def test_rlvr_unbiased_two_arm_enumeration_control():
 def test_rlvr_rejects_incomplete_shapes_and_singleton_groups():
     with pytest.raises(ValueError): rlvr(torch.zeros(2,3),torch.tensor([0]),[2],[1.],[1])
     with pytest.raises(ValueError): rlvr(torch.zeros(1,3),torch.tensor([0]),[1],[1.],[1])
+
+
+def test_self_opd_near_equal_distributions_keep_small_positive_signal():
+    s=torch.tensor([[12.,1.,-3.,4.]],dtype=torch.float32,requires_grad=True)
+    q=s.detach().clone();q[0,1]+=0.002
+    loss,m=self_opd(s,q)
+    sd=s.detach().double();qd=q.double()
+    lp=sd.log_softmax(-1);lq=qd.log_softmax(-1)
+    reference=(lp.exp()*(lp-lq)).sum()
+    assert loss.dtype==torch.float64 and m['objective_dtype']=='float64'
+    assert 0 < loss.item() < 1e-9
+    assert torch.allclose(loss,reference,atol=1e-18,rtol=1e-8)
+    loss.backward()
+    assert torch.isfinite(s.grad).all() and s.grad.abs().max()>0
+
+def test_self_opd_equal_distributions_do_not_create_training_signal():
+    s=torch.tensor([[12.,1.,-3.,4.]],requires_grad=True)
+    loss,_=self_opd(s,s.detach().clone())
+    loss.backward()
+    assert loss.item()==0 and s.grad.abs().max()<1e-15

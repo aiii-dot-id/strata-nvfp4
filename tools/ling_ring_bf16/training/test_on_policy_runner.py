@@ -37,14 +37,14 @@ class FakeTrainer(torch.nn.Module):
         super().__init__(); self.p=torch.nn.ParameterList([torch.nn.Parameter(torch.tensor(0.)) for _ in range(6)])
     def forward(self, features):
         base=torch.tensor([[1.,0.,-1.],[0.,1.,-1.]],device=self.p[0].device).repeat(features.shape[0]//2,1)
-        shift=sum((i+1)*p for i,p in enumerate(self.p))*torch.ones_like(base)
+        shift=sum((i+1)*p for i,p in enumerate(self.p))*features[:,0,None]*torch.tensor([1.,0.,-1.],device=base.device)
         return base+shift
 
 
 def _record(reward=1.0,group=0):
     logits=np.array([[1.,0.,-1.],[0.,1.,-1.]],dtype=np.float32)
     lp=torch.log_softmax(torch.from_numpy(logits),-1).gather(1,torch.tensor([[0],[1]])).flatten().numpy()
-    return {"features":torch.zeros(2,3),"logits":logits,"ids":[0,1],"sampling_logprobs":lp,"teacher":np.zeros_like(logits),"grade":{"reward":reward},"group":group}
+    return {"features":torch.full((2,3),1.+reward),"logits":logits,"ids":[0,1],"sampling_logprobs":lp,"teacher":np.zeros_like(logits),"grade":{"reward":reward},"group":group}
 
 
 def test_update_cpu_fake_trainer_checks_gradients_for_both_objectives(monkeypatch):

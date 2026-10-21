@@ -2,7 +2,7 @@
 AI Identity Incorported <james@aiii.id>.
 """
 from __future__ import annotations
-import argparse, copy, fcntl, gc, hashlib, json, os, sys, time
+import argparse, copy, fcntl, gc, hashlib, json, os, shutil, sys, time
 from pathlib import Path
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ CONFIG={'schema':'strata-on-policy-qualification-v1','rounds':2,'samples_per_pro
         'init_seed':61021,'rollout_seed':41021,'eval_seed':41022,
         'max_rlvr_batches_per_round':3,'native_timeout_seconds':300,
         'max_job_seconds':14400,'trainable_scope':'one final-layer expert gate/up/down LoRA',
-        'self_opd':'mean full-vocabulary reverse KL at fresh student-sampled prefixes; frozen RLVR-trained endpoint of same base as teacher; identical original prompt; fixed-prefix semi-gradient',
+        'self_opd':'FP64 mean full-vocabulary reverse KL at fresh student-sampled prefixes; frozen RLVR-trained endpoint of same base as teacher; identical original prompt; fixed-prefix semi-gradient',
         'rlvr':'negative mean leave-one-out advantage times sequence-summed sampled log probability; one update per freshly collected round',
         'restore_audit':'replay second batch only to compare uninterrupted and restored state; not another on-policy update',
         'teacher':'RLVR endpoint frozen before new zero-adapter Self-OPD student; no reference-answer augmentation',
@@ -123,7 +123,49 @@ def update(t,opt,records,arm):
     torch.cuda.synchronize()
     return {'post_update_fixed_batch_loss':float(post_loss),'objective':arm,'loss':float(loss.detach()),'gradient_norm':norm,'gradient':grad,'parameters':after,'metrics':plain(metrics),'current_policy_logit_parity':parity,'sampled_logprob_max_abs':error,'response_tokens':len(logits),'update_seconds':time.monotonic()-start}
 
-def run(model,suite_path,out,*,parent_checkpoint_digest):
+
+def admit_rlvr_endpoint(prior, model, pins):
+    """Reuse a completed RLVR subgate after a later, recorded interruption."""
+    prior=Path(prior)
+    if (prior/'evaluation').exists():raise ValueError('import would reuse previously evaluated held-out tasks')
+    plan=json.loads((prior/'PLAN.json').read_text())
+    if plan['model']!=model:raise ValueError('imported RLVR model mismatch')
+    for key in ('suite','executable','manifest','native_profile','parent_checkpoint_digest'):
+        if plan['pins'][key]!=pins[key]:raise ValueError('imported RLVR pin mismatch '+key)
+    # Only the new objective, admission path, comparison implementation and
+    # their CPU tests may differ. Native engine, capture and optimizer stay fixed.
+    allowed={'tools/ling_ring_bf16/training/'+x for x in (
+        'on_policy_losses.py','on_policy_runner.py','qualify.py',
+        'test_on_policy_losses.py','test_on_policy_runner.py','test_on_policy_import.py',
+        'test_compare_logits.py')}
+    previous=plan['pins']['source_closure'];current=pins['source_closure']
+    changed={k for k in set(previous)|set(current) if previous.get(k)!=current.get(k)}
+    if changed-allowed:raise ValueError('imported RLVR incompatible source change')
+    before=json.loads(prior.with_suffix('.binding-before.json').read_text())
+    after=json.loads(prior.with_suffix('.binding-after.json').read_text())
+    returned=json.loads(prior.with_suffix('.RETURN.json').read_text())
+    if before!=after or digest(before)!=pins['parent_checkpoint_digest'] or returned['checkpoint_exact'] is not True or returned['foreign_gpu_preserved'] is not True:raise ValueError('imported RLVR restoration binding')
+    if returned['error'] is not None:
+        reason=json.loads(prior.with_suffix('.NUMERICAL-INTERRUPTION.json').read_text())
+        if returned['error']!="RuntimeError('cancelled by SIGTERM')" or reason.get('self_opd_updates')!=0 or reason.get('rlvr_qualified') is not True:raise ValueError('unqualified interrupted source')
+    q=json.loads((prior/'rlvr-QUALIFIED.json').read_text())
+    for key in ('export_reload_exact','training_state_restore_exact','optimizer_rng_exact'):
+        if q.get(key) is not True:raise ValueError('imported RLVR subgate failed '+key)
+    if q.get('native_forward',{}).get('passed') is not True or len(q.get('steps',[]))!=2:raise ValueError('imported RLVR updates missing')
+    for step in q['steps']:
+        if step['objective']!='rlvr' or not np.isfinite(step['gradient_norm']) or not step['gradient_norm']>0:raise ValueError('imported RLVR update invalid')
+    hashes=[]
+    for name in ('zero.adapter','rlvr-step-1.adapter','rlvr-step-2.adapter','rlvr-resumed.adapter'):
+        f=prior/name;m=json.loads(Path(str(f)+'.json').read_text());h=native.sha(f)
+        if m.get('payload_sha256')!=h or m.get('checkpoint_sha256')!=pins['manifest'] or m.get('model')!=model:raise ValueError('imported RLVR adapter binding')
+        hashes.append(h)
+    if hashes[0]==hashes[1] or hashes[1]==hashes[2] or hashes[2]!=hashes[3] or hashes[2]!=q['adapter_sha256']:raise ValueError('imported RLVR update/restore hashes')
+    st=prior/'rlvr-snapshot-step1';sm=json.loads((st/'state.json').read_text())
+    if native.sha(st/'tensors.safetensors')!=sm['payload_sha256'] or sm['config_binding']['snapshot_adapter_sha256']!=hashes[1]:raise ValueError('imported RLVR snapshot binding')
+    if sm['config_binding']['parent_checkpoint_digest']!=pins['parent_checkpoint_digest']:raise ValueError('imported RLVR snapshot parent')
+    return q,{'source_directory':str(prior),'plan_sha256':native.sha(prior/'PLAN.json'),'qualification_sha256':native.sha(prior/'rlvr-QUALIFIED.json'),'return_sha256':native.sha(prior.with_suffix('.RETURN.json')),'adapter_sha256':hashes[2],'allowed_source_changes':sorted(changed),'fresh_self_opd_student':True}
+
+def run(model,suite_path,out,*,parent_checkpoint_digest,qualified_rlvr=None):
     out=Path(out);out.mkdir(parents=True,exist_ok=False);suite=tasks.load_suite(suite_path)
     train=[t for t in suite if t.split=='training'];held=[t for t in suite if t.split=='held_out'];ret=[t for t in suite if t.split=='retention']
     if (len(train),len(held),len(ret))!=(4,8,4):raise ValueError('suite split contract')
@@ -137,7 +179,9 @@ def run(model,suite_path,out,*,parent_checkpoint_digest):
         from generate_ring import _eos_ids
         eos=_eos_ids(cp);eos_source='generation_config.json'
     pins={'suite':native.sha(suite_path),'runner':native.sha(__file__),'executable':native.sha(exe),'manifest':manifest,'source_closure':native._source_closure(native.ROOT),'parent_checkpoint_digest':parent_checkpoint_digest,'native_profile':c['profile']}
+    imported=admit_rlvr_endpoint(qualified_rlvr,model,pins) if qualified_rlvr else None
     plan=dict(CONFIG,model=model,pins=pins,eos=eos,eos_source=eos_source,train_ids=[t.id for t in train],heldout_ids=[t.id for t in held],retention_ids=[t.id for t in ret])
+    plan['imported_rlvr']=imported[1] if imported else None
     native.dump(out/'PLAN.json',plan);start=time.monotonic();t=None;cost={};counter=0
     def native_stage(name,tokens,**kw):
         nonlocal counter
@@ -178,8 +222,19 @@ def run(model,suite_path,out,*,parent_checkpoint_digest):
     z=sample(train[0],'zero-audit',0,0,zero)
     if z['ids']!=initial_records[0]['ids'] or not np.array_equal(z['logits'],initial_records[0]['logits']):raise ValueError('zero-adapter sampling parity')
     adapters={'baseline':None};results={};datahash=digest({'suite':pins['suite'],'training_ids':[x.id for x in train]})
+    if imported:
+        q,origin=imported
+        # Bind the imported endpoint to this newly instantiated adapter geometry.
+        source=Path(qualified_rlvr)/'rlvr-step-2.adapter'
+        terminal.load_adapter(t,source,checkpoint_sha256=manifest)
+        destination=out/'rlvr-step-2.adapter'
+        shutil.copyfile(source,destination);shutil.copyfile(str(source)+'.json',str(destination)+'.json')
+        adapters['rlvr']=destination;results['rlvr']=dict(q,imported_from=origin)
+        native.dump(out/'IMPORTED-RLVR.json',origin)
+        native.dump(out/'rlvr-QUALIFIED.json',results['rlvr'])
     try:
         for arm in ARMS:
+            if imported and arm=='rlvr':continue
             with torch.no_grad():
                 for name,p in t.named_parameters():p.copy_(initial[name])
             t.cuda();opt=torch.optim.Adam(t.parameters(),lr=CONFIG['lr'],foreach=False)
@@ -264,14 +319,14 @@ def run(model,suite_path,out,*,parent_checkpoint_digest):
     finally:release(t)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--model',required=True,choices=native.MODELS);p.add_argument('--suite',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--model',required=True,choices=native.MODELS);p.add_argument('--suite',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--qualified-rlvr',type=Path);a=p.parse_args()
     a.output.parent.mkdir(parents=True,exist_ok=True)
     with open('/work/AI/experiments/strata-dev8-gpu.lock','a+') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         os.environ['CUBLAS_WORKSPACE_CONFIG']=':4096:8';torch.set_num_threads(1);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False;torch.use_deterministic_algorithms(True)
         before=qualify.bind_checkpoint(a.model);foreign=qualify.gpu_processes();native.dump(a.output.with_suffix('.binding-before.json'),before)
         error=None;start=time.monotonic()
-        try:run(a.model,a.suite,a.output,parent_checkpoint_digest=digest(before))
+        try:run(a.model,a.suite,a.output,parent_checkpoint_digest=digest(before),qualified_rlvr=a.qualified_rlvr)
         except BaseException as e:error=repr(e);raise
         finally:
             after=qualify.bind_checkpoint(a.model);native.dump(a.output.with_suffix('.binding-after.json'),after)

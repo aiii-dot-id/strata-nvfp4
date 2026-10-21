@@ -30,12 +30,14 @@ def self_opd(logits: torch.Tensor, teacher_logits: torch.Tensor, temperature: fl
     if logits.shape != teacher_logits.shape: raise ValueError("logit shapes must match")
     if logits.dtype != teacher_logits.dtype or logits.device != teacher_logits.device: raise ValueError("student and teacher logits must share dtype and device")
     temp = _temperature(temperature)
-    logp = torch.log_softmax(logits / temp, dim=-1)
-    with torch.no_grad(): logq = torch.log_softmax(teacher_logits.detach() / temp, dim=-1)
+    # Near-equal teacher/student distributions require FP64 accumulation.
+    # Keep model parameters and native logits unchanged; cast only this loss.
+    logp = torch.log_softmax(logits.double() / temp, dim=-1)
+    with torch.no_grad(): logq = torch.log_softmax(teacher_logits.detach().double() / temp, dim=-1)
     p = logp.exp()
     per_state = (p * (logp - logq)).sum(dim=-1)
     loss = per_state.sum()
-    return loss, {"states": int(logits.shape[0]), "vocab": int(logits.shape[1]), "temperature": temp, "reverse_kl_sum": float(loss.detach()), "teacher_detached": True}
+    return loss, {"states": int(logits.shape[0]), "vocab": int(logits.shape[1]), "temperature": temp, "reverse_kl_sum": float(loss.detach()), "teacher_detached": True, "objective_dtype": "float64"}
 
 
 def rlvr(logitsflat: torch.Tensor, tokenidsflat: torch.Tensor, lengths: Sequence[int], rewards: Sequence[float], groupids: Sequence[int], temperature: float = 1.0):
