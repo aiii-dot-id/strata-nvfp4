@@ -1,6 +1,7 @@
 import json
 import struct
 import torch
+import pytest
 import hashlib
 from safetensors.torch import load_file, save_file
 
@@ -113,4 +114,24 @@ def test_adapter_missing_metadata_rejects_without_mutating(tmp_path):
     (tmp_path/"adapter.lora.json").unlink()
     try: load_adapter(target,path); assert False
     except ValueError: pass
+    for got,want in zip(target.parameters(),before): assert torch.equal(got,want)
+
+
+def test_adapter_rejects_nan_header_and_metadata_without_mutating(tmp_path):
+    source=_trainer(); path=tmp_path/"bad.lora"; save_adapter(source,path,"ckpt")
+    target=_trainer(); before=[p.detach().clone() for p in target.parameters()]
+    raw=bytearray(path.read_bytes()); raw[20:24]=struct.pack("<f",float("nan")); path.write_bytes(raw)
+    with pytest.raises(ValueError): load_adapter(target,path)
+    for got,want in zip(target.parameters(),before): assert torch.equal(got,want)
+    save_adapter(source,path,"ckpt")
+    meta=json.loads((tmp_path/"bad.lora.json").read_text()); meta["alpha"]=float("nan"); (tmp_path/"bad.lora.json").write_text(json.dumps(meta))
+    with pytest.raises(ValueError): load_adapter(target,path)
+    for got,want in zip(target.parameters(),before): assert torch.equal(got,want)
+
+
+def test_adapter_rejects_boolean_integer_metadata_without_mutating(tmp_path):
+    source=_trainer(); path=tmp_path/"bad-int.lora"; save_adapter(source,path,"ckpt")
+    target=_trainer(); before=[p.detach().clone() for p in target.parameters()]
+    meta=json.loads((tmp_path/"bad-int.lora.json").read_text()); meta["expert"]=True; (tmp_path/"bad-int.lora.json").write_text(json.dumps(meta))
+    with pytest.raises(ValueError): load_adapter(target,path)
     for got,want in zip(target.parameters(),before): assert torch.equal(got,want)

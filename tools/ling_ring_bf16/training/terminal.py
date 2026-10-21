@@ -130,7 +130,7 @@ def load_adapter(trainer,path,checkpoint_sha256=None):
     raw=Path(path).read_bytes()
     if len(raw)<24 or raw[:8]!=MAGIC: raise ValueError("bad adapter magic")
     model_id,expert,rank,alpha=struct.unpack_from("<IIIf",raw,8); pos=24
-    if model_id!=(1 if trainer.model=="ling" else 2) or expert!=trainer.expert or rank!=trainer.rank or abs(alpha-trainer.alpha)>1e-6: raise ValueError("adapter binding mismatch")
+    if not math.isfinite(alpha) or model_id!=(1 if trainer.model=="ling" else 2) or expert!=trainer.expert or rank!=trainer.rank or abs(alpha-trainer.alpha)>1e-6: raise ValueError("adapter binding mismatch")
     shapes=[(rank,trainer.hidden),(512,rank),(rank,trainer.hidden),(512,rank),(rank,512),(trainer.hidden,rank)]; names=("gate_a","gate_b","up_a","up_b","down_a","down_b")
     for name,shape in zip(names,shapes):
         n=math.prod(shape)*4; end=pos+n
@@ -139,7 +139,14 @@ def load_adapter(trainer,path,checkpoint_sha256=None):
     if pos != len(raw): raise ValueError("adapter has trailing bytes")
     try: meta=json.loads(Path(str(path)+".json").read_text())
     except Exception as e: raise ValueError("missing adapter metadata") from e
-    if meta.get("payload_sha256")!=hashlib.sha256(raw[:pos]).hexdigest() or meta.get("model")!=trainer.model or int(meta.get("expert",-1))!=trainer.expert or int(meta.get("rank",-1))!=trainer.rank or abs(float(meta.get("alpha",float("nan")))-trainer.alpha)>1e-6 or int(meta.get("hidden",-1))!=trainer.hidden or (checkpoint_sha256 is not None and meta.get("checkpoint_sha256")!=checkpoint_sha256): raise ValueError("adapter metadata binding mismatch")
+    def exact_int(name, expected):
+        value=meta.get(name)
+        if isinstance(value,bool) or type(value) is not int or value!=expected: raise ValueError("adapter metadata binding mismatch")
+    if not isinstance(meta,dict) or meta.get("format")!="strata-terminal-lora-v1" or meta.get("author")!=AUTHOR or meta.get("payload_sha256")!=hashlib.sha256(raw[:pos]).hexdigest() or meta.get("model")!=trainer.model: raise ValueError("adapter metadata binding mismatch")
+    exact_int("expert",trainer.expert); exact_int("rank",trainer.rank); exact_int("hidden",trainer.hidden)
+    meta_alpha=meta.get("alpha")
+    if isinstance(meta_alpha,bool) or not isinstance(meta_alpha,(int,float)) or not math.isfinite(float(meta_alpha)) or abs(float(meta_alpha)-trainer.alpha)>1e-6: raise ValueError("adapter metadata binding mismatch")
+    if checkpoint_sha256 is not None and meta.get("checkpoint_sha256")!=checkpoint_sha256: raise ValueError("adapter metadata binding mismatch")
     for name,t in zip(names,[torch.frombuffer(bytearray(raw[24+sum(math.prod(s)*4 for s in shapes[:i]):24+sum(math.prod(s)*4 for s in shapes[:i+1])]),dtype=torch.float32).clone().reshape(s) for i,(name,s) in enumerate(zip(names,shapes))]):
         getattr(trainer,name).data.copy_(t)
     return meta
@@ -176,7 +183,9 @@ def restore_training_state(trainer,optimizer,path,*,data_hash,config_binding):
     if set(tensors)!=expected: raise ValueError("training parameter/optimizer key set mismatch")
     if "rng.cpu" not in tensors or tensors["rng.cpu"].dtype!=torch.uint8 or tensors["rng.cpu"].ndim!=1 or tensors["rng.cpu"].numel()!=torch.get_rng_state().numel(): raise ValueError("missing or invalid CPU RNG state")
     for key in expected- set(names)-{f"optim.{i}.{slot}" for i in range(len(names)) for slot in ("step","exp_avg","exp_avg_sq")}-{"rng.cpu"}:
-        if tensors[key].dtype!=torch.uint8: raise ValueError("invalid CUDA RNG state")
+        if tensors[key].dtype!=torch.uint8 or tensors[key].ndim!=1: raise ValueError("invalid CUDA RNG state")
+        cuda_index=int(key.rsplit(".",1)[1])
+        if tensors[key].numel()!=torch.cuda.get_rng_state_all()[cuda_index].numel(): raise ValueError("invalid CUDA RNG state length")
     param_by_idx=[p for g in optimizer.param_groups for p in g["params"]]
     for key in expected-set(names)-{"rng.cpu"}:
         if not key.startswith("optim."): continue

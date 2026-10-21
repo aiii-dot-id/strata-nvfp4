@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error(
           "usage: strata_ring_bf16 ROOT MANIFEST "
           "TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID "
-          "[--generate N --eos CSV] [--logits-mode all|last] "
+          "[--generate N --eos CSV] [--sampling-temperature T --sampling-seed U64] [--logits-mode all|last] "
           "[--route-probe POS,LAYER] [--lm-head-residency off|cuda] [--matmul bf16-gemv|fp32-cublas] [--router native|torch-cuda] [--rms-mode native|torch-cuda] [--rope-frequency native|original] [--attention-backend native|torch-cuda] [--pointwise native|torch-cuda] [--attention-order native|normalized-first] [--attention-scale native|divide]");
     const std::filesystem::path output = argv[4];
     if (std::filesystem::exists(output))
@@ -414,6 +414,8 @@ int main(int argc, char **argv) {
     std::string state_binding;
     bool terminal_capture = false;
     std::filesystem::path terminal_adapter_path;
+    std::optional<double> sampling_temperature;
+    std::optional<uint64_t> sampling_seed;
     std::vector<std::string> options;
     for (int i = 7; i < argc; i += 2) {
       const std::string option = argv[i];
@@ -453,6 +455,10 @@ int main(int argc, char **argv) {
       else if (option == "--state-binding") state_binding = argv[i + 1];
       else if (option == "--terminal-capture") { const std::string v = argv[i + 1]; if (v != "0" && v != "1") throw std::invalid_argument("terminal-capture must be 0 or 1"); terminal_capture = v == "1"; }
       else if (option == "--terminal-adapter") terminal_adapter_path = argv[i + 1];
+      else if (option == "--sampling-temperature")
+        sampling_temperature = sr::positive_finite_decimal(argv[i + 1]);
+      else if (option == "--sampling-seed")
+        sampling_seed = sr::uint64_decimal(argv[i + 1]);
       else
         throw std::invalid_argument("unknown option");
     }
@@ -482,12 +488,21 @@ int main(int argc, char **argv) {
       throw std::invalid_argument("continuation requires exact lowercase hex state binding");
     if (continuation_mode && (has_route_probe || logits_mode != "all"))
       throw std::invalid_argument("continuation requires all logits and no route probe");
-    if (!terminal_adapter_path.empty() && continuation_mode)
-      throw std::invalid_argument("terminal adapter is incompatible with continuation mode");
+    if (continuation_mode && !terminal_adapter_path.empty())
+      throw std::invalid_argument("terminal adapter is incompatible with continuation");
+    if (sampling_temperature.has_value() != sampling_seed.has_value())
+      throw std::invalid_argument("sampling temperature and seed must be supplied together");
+    if (continuation_mode && sampling_temperature)
+      throw std::invalid_argument("stochastic sampling is incompatible with continuation");
+    // Continuation binding is supplied by the wrapper through state_binding.
+    // It must cover adapter payload/profile/source identity when an adapter is active.
     if (stop_after != std::numeric_limits<size_t>::max() && state_out.empty())
       throw std::invalid_argument("stop-after requires state-out");
+    std::optional<std::pair<double, uint64_t>> sampling;
+    if (sampling_temperature)
+      sampling = std::make_pair(*sampling_temperature, *sampling_seed);
     sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3], 157184),
-                                    generate, eos);
+                                    generate, eos, 157184, 4096, sampling);
     if (has_route_probe && route_probe.position >= generation.kv_capacity())
       throw std::invalid_argument("route probe position exceeds evaluation window");
     std::signal(SIGINT, cancel_handler);

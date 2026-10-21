@@ -495,7 +495,7 @@ static sr::ContinuationState snapshot_ling_state(
 int main(int argc,char **argv) {
   try {
     if(argc < 7 || (argc - 7) % 2)
-      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --route-probe POS,LAYER --state-in FILE --state-out FILE --stop-after N --state-binding HEX64 --lm-head-residency off|cuda --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
+      throw std::runtime_error("usage: strata_ling_bf16 ROOT MANIFEST TOKENS_CSV NEW_OUTPUT CACHE_MIB CHECKPOINT_ID [--generate N --eos CSV --sampling-temperature T --sampling-seed U64 --route-probe POS,LAYER --state-in FILE --state-out FILE --stop-after N --state-binding HEX64 --lm-head-residency off|cuda --matmul bf16-gemv|fp32-cublas --rope-frequency native|original --rms-mode native|torch-cuda-order --pointwise native|torch-cuda]");
 
     const std::filesystem::path output=argv[4];
     if(std::filesystem::exists(output)) throw std::runtime_error("refusing existing output directory");
@@ -503,6 +503,7 @@ int main(int argc,char **argv) {
     std::optional<std::filesystem::path> state_in, state_out;
     std::optional<size_t> stop_after; std::string state_binding;
     bool terminal_capture = false; std::filesystem::path terminal_adapter_path;
+    std::optional<double> sampling_temperature; std::optional<uint64_t> sampling_seed;
     sl::MlaRopeFrequency rope_frequency=sl::MlaRopeFrequency::Native;
     sl::RmsMode rms_mode=sl::RmsMode::Native;
     std::string rope_frequency_name="native", rms_mode_name="native", matmul_name="bf16-gemv", pointwise_name="native"; MatmulBackend matmul_backend=MatmulBackend::Bf16Gemv; LmHeadResidency lm_head_residency=LmHeadResidency::Off; std::vector<std::string> options;
@@ -519,6 +520,8 @@ int main(int argc,char **argv) {
       else if(option=="--state-binding") state_binding=argv[i+1];
       else if(option=="--terminal-capture") { const std::string v=argv[i+1]; if(v!="0" && v!="1") throw std::invalid_argument("terminal-capture must be 0 or 1"); terminal_capture=v=="1"; }
       else if(option=="--terminal-adapter") terminal_adapter_path=argv[i+1];
+      else if(option=="--sampling-temperature") sampling_temperature=sr::positive_finite_decimal(argv[i+1]);
+      else if(option=="--sampling-seed") sampling_seed=sr::uint64_decimal(argv[i+1]);
       else if(option=="--matmul") { matmul_name=argv[i+1]; matmul_backend=parse_matmul_backend(matmul_name); }
       else if(option=="--lm-head-residency") lm_head_residency=parse_lm_head_residency(argv[i+1]);
       else if(option=="--rope-frequency") {
@@ -542,15 +545,23 @@ int main(int argc,char **argv) {
     }
     if(generate>1024) throw std::invalid_argument("generation exceeds 1024-token bound");
     if(generate && eos.empty()) throw std::invalid_argument("generation needs EOS IDs");
-    sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3],157184),generate,eos,157184,1024);
+    if(sampling_temperature.has_value() != sampling_seed.has_value())
+      throw std::invalid_argument("sampling temperature and seed must be supplied together");
+    std::optional<std::pair<double, uint64_t>> sampling;
+    if(sampling_temperature) sampling=std::make_pair(*sampling_temperature,*sampling_seed);
+    sr::GreedyGeneration generation(sr::vocabulary_ids(argv[3],157184),generate,eos,157184,1024,sampling);
     const bool continuation_mode = state_in.has_value() || state_out.has_value() || stop_after.has_value() || !state_binding.empty();
     if (continuation_mode && !sr::continuation_detail::hex64(state_binding))
       throw std::invalid_argument("continuation mode requires --state-binding HEX64");
     if (stop_after && !state_out) throw std::invalid_argument("stop-after requires state-out");
     if (route_probe && continuation_mode)
       throw std::invalid_argument("route probe is incompatible with continuation mode");
-    if (!terminal_adapter_path.empty() && continuation_mode)
-      throw std::invalid_argument("terminal adapter is incompatible with continuation mode");
+    if (continuation_mode && !terminal_adapter_path.empty())
+      throw std::invalid_argument("terminal adapter is incompatible with continuation");
+    if (continuation_mode && sampling_temperature)
+      throw std::invalid_argument("stochastic sampling is incompatible with continuation");
+    // Continuation binding is supplied by the wrapper through state_binding.
+    // It must cover adapter payload/profile/source identity when an adapter is active.
     const size_t cache_mib=sr::unsigned_decimal(argv[5]);
     if(cache_mib<5 || cache_mib>2048) throw std::runtime_error("cache budget must be 5..2048 MiB");
     const std::string identity=argv[6];
