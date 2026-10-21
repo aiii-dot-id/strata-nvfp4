@@ -70,3 +70,34 @@ def test_nonfinite_receipt_metrics_are_json_safe():
   z=update(*a,**k); next(m.parameters()).data.fill_(float("nan")); return z
  out=bounded_update(m,o,r,"rlvr",bounds=Bounds(100,100,100,1),clip_norm=None,update_fn=bad)
  json.dumps(out,allow_nan=False)
+
+def _reference_hash(t):
+ import hashlib
+ x=t.detach().contiguous().cpu(); x=x.reshape(1) if x.ndim==0 else x; h=hashlib.sha256(); h.update(str(t.dtype).encode()); h.update(repr(tuple(t.shape)).encode()); h.update(x.view(torch.uint8).numpy().tobytes()); return h.hexdigest()
+
+def test_frozen_hash_matches_reference_for_layouts_and_dtypes():
+ from bounded_update import _tensor_hash
+ vals=[torch.empty(0,dtype=torch.float32),torch.tensor(3.25),torch.arange(24,dtype=torch.float32).reshape(4,6).t(),torch.arange(64,dtype=torch.float32).reshape(8,8)[::2,1::2],torch.arange(12,dtype=torch.bfloat16).reshape(3,4).t()]
+ for t in vals: assert _tensor_hash(t)==_reference_hash(t)
+
+def test_frozen_hash_chunk_transfer_bound(monkeypatch):
+ import bounded_update as bu
+ seen=[]; original=bu._chunk_bytes
+ def wrapped(chunk):
+  seen.append(chunk.numel()*chunk.element_size()); return original(chunk)
+ monkeypatch.setattr(bu,'_chunk_bytes',wrapped)
+ bu._tensor_hash(torch.arange((bu._HASH_CHUNK_BYTES//4)+17,dtype=torch.float32))
+ assert seen and max(seen)<=bu._HASH_CHUNK_BYTES
+
+def test_frozen_hash_rejects_unsupported_layout():
+ from bounded_update import _tensor_hash
+ class Fake:
+  layout='sparse'
+ with pytest.raises(ValueError,match='unsupported buffer layout'): _tensor_hash(Fake())
+
+def test_buffer_mutation_wins_over_nonfinite_receipt():
+ m,o,r=setup(); before=state(m,o)
+ def bad(*a,**k):
+  z=update(*a,**k); m.sentinel.add_(1); next(m.parameters()).data.fill_(float('nan')); return z
+ with pytest.raises(RuntimeError,match='frozen buffer'): bounded_update(m,o,r,'rlvr',bounds=Bounds(100,100,100,1),clip_norm=None,update_fn=bad)
+ assert eq(before[:4],state(m,o)[:4]); assert not torch.equal(m.sentinel,before[4])

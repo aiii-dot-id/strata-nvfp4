@@ -19,8 +19,37 @@ class Bounds:
         if self.max_mean_kl<0 or self.max_max_kl<0 or self.max_selected_log_ratio<0: raise ValueError('bounds must be nonnegative')
         if type(self.chunk_rows) is not int or self.chunk_rows<1: raise ValueError('chunk_rows must be positive')
 
+_HASH_CHUNK_BYTES=8*1024*1024
+
+def _chunk_bytes(chunk):
+    if not torch.is_tensor(chunk) or chunk.layout is not torch.strided: raise ValueError('unsupported buffer layout')
+    if chunk.numel()*chunk.element_size()>_HASH_CHUNK_BYTES: raise RuntimeError('hash chunk exceeds bound')
+    try:
+        return chunk.detach().contiguous().cpu().view(torch.uint8).numpy().tobytes()
+    except (RuntimeError,TypeError) as exc:
+        raise ValueError(f'unsupported buffer dtype: {chunk.dtype}') from exc
+
 def _tensor_hash(t):
-    x=t.detach().cpu().contiguous(); h=hashlib.sha256(); h.update(str(x.dtype).encode()); h.update(repr(tuple(x.shape)).encode()); h.update(x.numpy().tobytes()); return h.hexdigest()
+    if not torch.is_tensor(t) or t.layout is not torch.strided: raise ValueError('unsupported buffer layout')
+    h=hashlib.sha256(); h.update(str(t.dtype).encode()); h.update(repr(tuple(t.shape)).encode())
+    n=t.numel()
+    if n==0: return h.hexdigest()
+    elems=max(1,_HASH_CHUNK_BYTES//t.element_size())
+    if t.ndim==0: flat=t.reshape(1)
+    elif t.is_contiguous(): flat=t.view(-1)
+    else: flat=None
+    for start in range(0,n,elems):
+        end=min(start+elems,n)
+        if flat is not None:
+            chunk=flat[start:end]
+        else:
+            linear=torch.arange(start,end,dtype=torch.long,device=t.device)
+            coords=[]; rem=linear
+            for size in reversed(tuple(t.shape)):
+                coords.append(rem % size); rem=rem // size
+            coords=tuple(reversed(coords)); chunk=t[coords]
+        h.update(_chunk_bytes(chunk))
+    return h.hexdigest()
 def _buffer_hashes(model): return {n:_tensor_hash(b) for n,b in model.named_buffers()}
 def _finite_state(x):
     if torch.is_tensor(x): return (not x.is_floating_point()) or bool(torch.isfinite(x).all())
@@ -81,10 +110,10 @@ def bounded_update(trainer,opt,records,arm,*,bounds,temperature=1.,chunk_rows=No
     named,device=_validate_binding(trainer,opt); snap=_snapshot(trainer,opt,named,device); update_fn=update_fn or capability_update.update
     try:
         result=update_fn(trainer,opt,records,arm,temperature=temperature,chunk_rows=chunk_rows,clip_norm=clip_norm)
-        if not all(_finite_state(p) and (p.grad is None or _finite_state(p.grad)) for _,p in trainer.named_parameters()) or not _finite_state(opt.state_dict()):
-            _restore(trainer,opt,snap); return {'accepted':False,'reason':'nonfinite post-update state','objective':arm,'update':result,'metrics':{'finite':False,'mean_kl':None,'max_kl':None,'max_selected_log_ratio':None,'rows':0},'bounds':asdict(bounds),'restored':True}
         if _buffer_hashes(trainer)!=snap['buffers']:
             _restore(trainer,opt,snap); raise RuntimeError('frozen buffer mutation; trial invalid and caller must abort')
+        if not all(_finite_state(p) and (p.grad is None or _finite_state(p.grad)) for _,p in trainer.named_parameters()) or not _finite_state(opt.state_dict()):
+            _restore(trainer,opt,snap); return {'accepted':False,'reason':'nonfinite post-update state','objective':arm,'update':result,'metrics':{'finite':False,'mean_kl':None,'max_kl':None,'max_selected_log_ratio':None,'rows':0},'bounds':asdict(bounds),'restored':True}
         metric_rng_cpu=torch.get_rng_state().clone()
         metric_rng_cuda=torch.cuda.get_rng_state(device).clone() if device.type=='cuda' else None
         try:
