@@ -10,6 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 import native, terminal, qualify, on_policy_runner as old, capability_tasks as tasks
 from completion import CompletionConfig, run_completion
 from capability_update import update, advantages
+import boundedpolicy
 from transformers import AutoTokenizer
 PREVIOUS=Path('/work/AI/experiments/strata-on-policy-20261021-r1')
 CONFIG={'schema':'strata-capability-v2','author':terminal.AUTHOR,'rlvr_rounds':6,'opd_rounds':4,
@@ -64,6 +65,17 @@ def nomination(records,h,active_families=tasks.FAMILIES):
     expert=int(score.argmax())
     if not float(score[expert])>0:raise ValueError('no expert exposed to informative groups in both families' if len(active_families)==2 else 'no expert exposed to informative groups in the active family')
     return expert,{'expert':expert,'active_families':list(active_families),'rule':'maximum minimum family share of advantage-weighted sampled-token routes','counts':{k:v.tolist() for k,v in counts.items()},'score':float(score[expert])}
+def perform_update(trainer,opt,records,arm,*,policy=None,temperature=1.,chunk_rows=8,clip_norm=1.):
+    # The absent-policy branch is deliberately the historical call, with no
+    # policy-dependent defaults or wrapper side effects.
+    if policy is None:
+        return {'accepted':True,'reason':'legacy_unbounded',
+                'update':update(trainer,opt,records,arm,temperature=temperature,
+                                chunk_rows=chunk_rows,clip_norm=clip_norm)}
+    from bounded_update import bounded_update
+    return bounded_update(trainer,opt,records,arm,bounds=boundedpolicy.bounds(policy,chunk_rows),
+                          temperature=temperature,chunk_rows=chunk_rows,clip_norm=clip_norm)
+
 def summarize(rows):
     out={}
     for arm in sorted({r['arm'] for r in rows}):
@@ -80,8 +92,11 @@ def select_teacher(rows):
         return [dict(task=r['task'],split=r['split'],family=r['family'],reward=r['grade']['reward']) for r in rows if r['arm']==name]
     return tasks.teacher_selection_bound(arm('baseline'),arm('rlvr'))
 
-def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_saturated_controls=False):
+def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_saturated_controls=False, bounded_update_policy=None):
+    if bounded_update_policy is not None and calibration_from is not None:
+        raise ValueError('bounded candidate requires fresh calibration; historical import is not admitted')
     out=Path(out);out.mkdir(parents=True,exist_ok=False)
+    policy = boundedpolicy.parse_policy(bounded_update_policy) if bounded_update_policy is not None else None
     all_tasks=tasks.load_suite(suite,private)
     if len([t for t in all_tasks if t.split=='teacher_selection'])!=16:raise ValueError('selection count')
     cfg=native.MODELS[model];cp=Path(cfg['checkpoint']);manifest=native.sha(cfg['manifest'])
@@ -100,12 +115,18 @@ def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_sa
     controller=CompletionConfig(model=model,max_new_tokens=CONFIG['ling_answer_tokens'],
                  thinking_tokens=CONFIG['ring_thinking_tokens'],answer_tokens=CONFIG['ring_answer_tokens'],
                  context_capacity=cfg['capacity'],eos_token_ids=tuple(eos))
-    native.dump(out/'PLAN.json',dict(CONFIG,model=model,pins=pins,completion=dataclasses.asdict(controller),
+    plan = dict(CONFIG,model=model,pins=pins,completion=dataclasses.asdict(controller),
                  heldout_sealed_until_freeze=True,allow_saturated_controls=allow_saturated_controls,
                  calibration_from=str(calibration_from) if calibration_from else None,
                  calibration_reuse='admission and nomination only; all optimizer updates use fresh rollouts',
                  old_qualification_source='4ac6b3a14964b19529e77802ec14f7745004472f',
-                 suite_schema='fresh task prompts and evaluator-only private oracles'))
+                 suite_schema='fresh task prompts and evaluator-only private oracles')
+    if policy is not None:
+        plan['lr'] = policy['learning_rates']['rlvr']
+        plan['opd_lr'] = policy['learning_rates']['self_opd']
+        plan['bounded_update_policy'] = policy
+        plan['bounded_update_policy_sha256'] = boundedpolicy.policy_sha256(policy)
+    native.dump(out/'PLAN.json',plan)
     start=time.monotonic();trainer=None;native_count=0
     def stage(path,ids,**kw):
         nonlocal native_count
@@ -215,15 +236,19 @@ def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_sa
         if z['ids']!=initial[0]['ids'] or not np.array_equal(z['logits'],initial[0]['logits']):raise ValueError('zero-adapter native sampling differs')
         native.dump(out/'ZERO-PARITY.json',{'exact':True,'baseline':str(initial[0]['path']),'zero':str(z['path'])})
         # Calibration decides a fixed prompt pool; no candidate-dependent rejection sampling.
-        native.dump(out/'TRAINING-ADMISSION.json',{'scope':'one terminal expert','expert':expert,'active_ids':activeids,
-                    'coverage':cov,'active_families':active_families,'retention_control_families':controls,'fixed_rounds':CONFIG['rlvr_rounds'],'lr':CONFIG['lr'],'heldout_used':False})
+        admission={'scope':'one terminal expert','expert':expert,'active_ids':activeids,
+                    'coverage':cov,'active_families':active_families,'retention_control_families':controls,'fixed_rounds':CONFIG['rlvr_rounds'],
+                    'lr':(policy['learning_rates']['rlvr'] if policy is not None else CONFIG['lr']),'heldout_used':False}
+        if policy is not None:
+            admission['opd_lr']=policy['learning_rates']['self_opd']; admission['bounded_update_policy_sha256']=boundedpolicy.policy_sha256(policy)
+        native.dump(out/'TRAINING-ADMISSION.json',admission)
         results={};adapters={'baseline':None};frozen_teacher=None
         selection=[x for x in all_tasks if x.split=='teacher_selection']
         for arm in ('rlvr','self_opd'):
             if arm=='self_opd' and frozen_teacher is None:break
             with torch.no_grad():
                 for n,p in trainer.named_parameters():p.copy_(initial_params[n])
-            trainer.cuda();lr=CONFIG['lr'] if arm=='rlvr' else CONFIG['opd_lr']
+            trainer.cuda();lr=(policy['learning_rates'][arm] if policy is not None else (CONFIG['lr'] if arm=='rlvr' else CONFIG['opd_lr']))
             opt=torch.optim.Adam(trainer.parameters(),lr=lr,foreach=False)
             current=zero;steps=[]
             rounds=CONFIG['rlvr_rounds'] if arm=='rlvr' else CONFIG['opd_rounds']
@@ -246,24 +271,46 @@ def run(model,suite,private,out,checkpoint_digest,calibration_from=None,allow_sa
                         old.compact(d,r['teacher_rows'])
                 batchhash=digest([{'rollout':native.sha(r['path']/'ROLLOUT.json'),'stages':r['native_stages']} for r in records])
                 conf={'campaign_plan':native.sha(out/'PLAN.json'),'arm':arm,'expert':expert,'lr':lr,'parent_checkpoint':checkpoint_digest}
+                if policy is not None:
+                    conf['bounded_update_policy_sha256']=boundedpolicy.policy_sha256(policy)
+                    conf['bounded_update_policy']=policy
                 trainer.cuda()
                 # Every update is surrounded by a restorable state; exact replay audits final update.
                 if steps:
                     beforestep=out/f'{arm}-snapshot-before-{roundno+1}'
                     terminal.save_training_state(trainer,opt,beforestep,step=len(steps),iteration_cursor=roundno,data_hash=batchhash,config_binding=conf)
-                metric=update(trainer,opt,records,arm,temperature=CONFIG['temperature'],chunk_rows=CONFIG['chunk_rows'],clip_norm=CONFIG['clip_norm'])
+                decision=perform_update(trainer,opt,records,arm,policy=policy,
+                                         temperature=CONFIG['temperature'],chunk_rows=CONFIG['chunk_rows'],clip_norm=CONFIG['clip_norm'])
+                metric=decision['update']
+                if policy is not None:
+                    rec=boundedpolicy.receipt(policy,arm=arm,round_no=roundno+1,steps_before=len(steps),
+                                              steps_after=(len(steps)+1 if decision['accepted'] else len(steps)),
+                                              current_adapter_sha256=native.sha(current),batch_sha256=batchhash,decision=decision)
+                    if not decision['accepted']:
+                        native.dump(out/f'{arm}-REJECTED-{roundno+1}.json',rec)
+                        log(out,dict(rec,stage='bounded_update_rejected'))
+                        del records; release(trainer)
+                        continue
                 current=out/f'{arm}-step-{len(steps)+1}.adapter';terminal.save_adapter(trainer,current,cp,checkpoint_sha256=manifest)
-                steps.append(metric);native.dump(out/f'{arm}-UPDATE-{len(steps)}.json',dict(metric,round=roundno+1,adapter_sha256=native.sha(current),batch_sha256=batchhash))
+                steps.append(metric);native.dump(out/f'{arm}-UPDATE-{len(steps)}.json',dict(metric,round=roundno+1,adapter_sha256=native.sha(current),batch_sha256=batchhash,
+                    bounded_update=(policy is not None),bounded_decision=(decision if policy is not None else None)))
                 log(out,{'stage':'update','arm':arm,'step':len(steps),'round':roundno+1,
                          'loss':metric['loss'],'gradient_norm':metric['gradient_norm'],'family_gradient_norm':metric['family_gradient_norm']})
                 if len(steps)>1:
                     end_params={k:v.detach().clone() for k,v in trainer.named_parameters()};endopt=copy.deepcopy(opt.state_dict())
                     endrng=torch.get_rng_state().clone();endcuda=[x.clone() for x in torch.cuda.get_rng_state_all()]
                     terminal.restore_training_state(trainer,opt,beforestep,data_hash=batchhash,config_binding=conf)
-                    repeated=update(trainer,opt,records,arm,temperature=CONFIG['temperature'],chunk_rows=CONFIG['chunk_rows'],clip_norm=CONFIG['clip_norm'])
+                    repeated_decision=perform_update(trainer,opt,records,arm,policy=policy,
+                        temperature=CONFIG['temperature'],chunk_rows=CONFIG['chunk_rows'],clip_norm=CONFIG['clip_norm'])
+                    repeated=repeated_decision['update']
+                    if policy is not None and not repeated_decision['accepted']:
+                        raise ValueError('accepted bounded update was rejected on exact replay')
                     qualify.tree_exact(dict(trainer.named_parameters()),end_params);qualify.tree_exact(opt.state_dict(),endopt)
                     qualify.tree_exact(torch.get_rng_state(),endrng);qualify.tree_exact(torch.cuda.get_rng_state_all(),endcuda)
                     for key in ('loss','gradient','parameters'):qualify.tree_exact(metric[key],repeated[key])
+                    if policy is not None:
+                        qualify.tree_exact(decision['metrics'],repeated_decision['metrics'])
+                        if decision['accepted'] != repeated_decision['accepted']: raise ValueError('bounded decision replay mismatch')
                     resumed=out/f'{arm}-resumed-step-{len(steps)}.adapter';terminal.save_adapter(trainer,resumed,cp,checkpoint_sha256=manifest)
                     if native.sha(current)!=native.sha(resumed):raise ValueError('resumed adapter byte mismatch')
                     native.dump(out/f'{arm}-RESTORE-{len(steps)}.json',{'parameters_exact':True,'optimizer_rng_exact':True,'resumed_export_exact':True})
@@ -320,6 +367,7 @@ def main():
     ap=argparse.ArgumentParser();ap.add_argument('--model',required=True,choices=native.MODELS)
     ap.add_argument('--suite',type=Path,required=True);ap.add_argument('--private',type=Path,required=True);ap.add_argument('--output',type=Path,required=True)
     ap.add_argument('--calibration-from',type=Path);ap.add_argument('--allow-saturated-controls',action='store_true')
+    ap.add_argument('--bounded-update-policy',type=Path)
     a=ap.parse_args();a.output.parent.mkdir(parents=True,exist_ok=True)
     with open('/work/AI/experiments/strata-dev8-gpu.lock','a+') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -327,7 +375,7 @@ def main():
         torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False;torch.use_deterministic_algorithms(True)
         before=qualify.bind_checkpoint(a.model);foreign=qualify.gpu_processes()
         native.dump(a.output.with_suffix('.binding-before.json'),before);error=None;outcome=None;started=time.monotonic()
-        try:outcome=run(a.model,a.suite,a.private,a.output,digest(before),a.calibration_from,a.allow_saturated_controls)
+        try:outcome=run(a.model,a.suite,a.private,a.output,digest(before),a.calibration_from,a.allow_saturated_controls,a.bounded_update_policy)
         except BaseException as ex:error=repr(ex);raise
         finally:
             release();after=qualify.bind_checkpoint(a.model);native.dump(a.output.with_suffix('.binding-after.json'),after)

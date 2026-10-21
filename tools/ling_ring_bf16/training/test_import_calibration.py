@@ -11,7 +11,8 @@ pytestmark=pytest.mark.skipif(not SOURCE.is_dir(),reason='requires retained cali
 @pytest.fixture
 def setup(tmp_path):
  old=mod.read(SOURCE/'PLAN.json');new=copy.deepcopy(old)
- new['pins']['source']=mod.native._source_closure(mod.native.ROOT)
+ # Positive replay controls use the original admitted source identity.
+ # A bounded candidate is intentionally not admitted by this historical importer.
  new['allow_saturated_controls']=True;new['calibration_from']=str(SOURCE)
  plan=tmp_path/'PLAN.json';plan.write_text(json.dumps(new))
  suite=tasks.load_suite(SOURCE.parent/'SUITE.public.json',SOURCE.parent/'SUITE.private.json')
@@ -49,3 +50,11 @@ def test_retained_payload_hash_mutation(setup,monkeypatch):
  original=mod.native.sha
  monkeypatch.setattr(mod.native,'sha',lambda p:'0'*64 if Path(p).name=='selected-logits.f32' else original(p))
  with pytest.raises(ValueError,match='hash mismatch'):invoke(setup)
+
+
+def test_current_candidate_source_is_not_silently_readmitted(setup):
+ plan=setup[0];payload=mod.read(plan)
+ payload['pins']['source']=mod.native._source_closure(mod.native.ROOT)
+ plan.write_text(json.dumps(payload))
+ with pytest.raises(ValueError,match='native or objective source drift'):
+  invoke(setup)
