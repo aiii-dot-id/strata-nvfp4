@@ -199,6 +199,13 @@ main { flex: 1; min-height: 0; display: flex; }
 .st-toast { animation: toast-in 180ms var(--st-ease); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 
+/* this fork: a newer strata-nvfp4 release, a quiet link in the header (GET /metrics "update") */
+.update-note { display: inline-flex; align-items: center; gap: 2px; font-size: var(--st-fs-sm); color: var(--st-ink-muted); white-space: nowrap; }
+.update-note a { color: inherit; text-underline-offset: 2px; }
+.update-note a:hover { color: var(--st-accent); }
+.update-note__hide { border: 0; background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: var(--st-r-sm); cursor: pointer; }
+.update-note__hide:hover { color: var(--st-ink-soft); }
+
 /* ---------------------------------------------------------------- narrow screens */
 @media (max-width: 1000px) {
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -213,6 +220,7 @@ main { flex: 1; min-height: 0; display: flex; }
   .st-tab { padding: 0 10px; }
   .st-tab .st-icon { display: none; }
   #pill-text { display: none; }
+  .update-note { display: none; }               /* About > Model and engine still says it */
   .chat { padding: var(--st-s-5) var(--st-s-4); }
   .composer-wrap { padding: 0 var(--st-s-3) var(--st-s-3); }
   .monitor, .about { padding: var(--st-s-4); }

@@ -21,7 +21,7 @@ import setup  # noqa: E402
 class FamilyOrder(unittest.TestCase):
     def test_the_menu_order_on_nvidia(self):
         fams = setup.menu_families(False) + list(setup.OWN_PATH_FAMILIES)
-        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "qwen36"])   # this fork's NVFP4 families: before them
+        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "gyro", "qwen36"])   # this fork's NVFP4 families: before them
 
     def test_the_default_stays_the_first_family(self):
         self.assertEqual(setup.menu_families(False)[0], "qwen")
@@ -29,7 +29,7 @@ class FamilyOrder(unittest.TestCase):
 
     def test_nvfp4_is_not_listed_on_amd_and_intel(self):
         fams = setup.menu_families(True)
-        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth"])
+        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "gyro"])
         for f in setup.NVFP4_FAMILIES:                     # not offered there, and the menu says why
             self.assertIn("NVIDIA cards only", setup.nvfp4_offer(f, {"arch": "1200"}, True))
         self.assertIn("nvfp4", setup.NVFP4_UPSTREAM_ALIAS)   # --family nvfp4: upstream's name for them
@@ -51,6 +51,20 @@ class Nvfp4Note(unittest.TestCase):
             line = setup.family_menu_note("qwen-nvfp4-gptq", False, {"arch": arch})
             self.assertIn("runs, but UD-IQ4_XS is faster on this card", line, arch)
             self.assertNotIn("native FP4", line)
+
+    def test_an_avx2_cpu_is_told_its_rows_but_not_refused(self):      # #2347 (upstream), on this fork's NVFP4 lines
+        line = setup.family_menu_note("qwen-nvfp4-gptq", False, {"arch": 120}, avx2=True, avx512=False)
+        self.assertIn("no AVX-512", line)
+        self.assertIn("AVX2", line)
+        self.assertIn("native FP4 on this card", line)               # the card part is unchanged
+        self.assertTrue(setup.nvfp4_cpu_note(True, False))
+
+    def test_an_avx512_cpu_and_a_cpu_without_avx2_get_no_cpu_note(self):
+        self.assertEqual(setup.nvfp4_cpu_note(True, True), "")
+        self.assertEqual(setup.nvfp4_cpu_note(False, False), "")     # the older-CPU build says its own piece
+        line512 = setup.family_menu_note("qwen-nvfp4-gptq", False, {"arch": 120})
+        self.assertNotIn("AVX", line512)
+        self.assertEqual(line512, setup.family_menu_note("qwen-nvfp4-gptq", False, {"arch": 120}, avx2=True, avx512=True))
 
     def test_only_the_nvfp4_families_get_it(self):
         for f in ("qwen", "swift", "coder"):
@@ -96,7 +110,11 @@ class RecommendedSizes(unittest.TestCase):
     def test_without_the_ram_the_largest_that_fits_and_iq3_s_stays_marked(self):
         n = self.names("qwen")
         self.assertEqual(setup.recommended_size("qwen", n, 61.0), "IQ3_XXS")      # IQ3_S needs 62 GB
-        self.assertEqual(setup.recommended_size("qwen", n, 50.0), "IQ2_XS")
+        self.assertEqual(setup.recommended_size("qwen", n, 50.0), "IQ3_XXS")      # 48 GB tier (RAM + VRAM)
+        self.assertEqual(setup.recommended_size("qwen", n, 40.0, 8.0), "IQ3_XXS")  # 40 + 8 = 48 GB together
+        self.assertEqual(setup.recommended_size("qwen", n, 32.0, 12.0), "IQ2_XS")  # 44 GB: the 40 GB tier
+        self.assertEqual(setup.recommended_size("swift", self.names("swift"), 32.0, 12.0), "IQ2_XS")
+        self.assertEqual(setup.recommended_size("qwen", n, 32.0, 32.0), "IQ3_S")   # 64 GB together
         self.assertEqual(setup.size_tag("qwen", "IQ3_S"), " (recommended)")
 
     def test_coder_has_nothing_marked(self):
@@ -134,11 +152,11 @@ class UnslothDefaultEnv(unittest.TestCase):
 
 class EnginePlaceholders(unittest.TestCase):
     def test_every_engine_minimum_is_this_release(self):
-        self.assertEqual(setup.UPSTREAM_MIN_ENGINE, (0, 1, 44, 1))   # this fork: MIN_ENGINE is its own release, above it
-        self.assertGreaterEqual(setup.MIN_ENGINE, (0, 1, 44, 1))
+        self.assertEqual(setup.UPSTREAM_MIN_ENGINE, (0, 1, 45))   # this fork: MIN_ENGINE is its own release, above it
+        self.assertGreaterEqual(setup.MIN_ENGINE, (0, 1, 45))
         for m in ("UD-Q5_K_XL", "UD-Q6_K_XL"):
             self.assertEqual(setup.MODELS[m]["engine"], (0, 1, 44), m)
-        self.assertIn("0.1.44", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8").split("project(strata VERSION", 1)[1][:12])
+        self.assertIn("0.1.45", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8").split("project(strata VERSION", 1)[1][:12])
 
 
 class KqLibrary(unittest.TestCase):
@@ -165,6 +183,30 @@ class KqLibrary(unittest.TestCase):
             (tmp / setup.KQ_LIB).write_bytes(b"new kq")
             setup.install_unpacked(tmp, eng)
             self.assertEqual((eng / setup.KQ_LIB).read_bytes(), b"new kq")
+
+
+class ImageEncoderDefault(unittest.TestCase):
+    """#2406: "images: yes" gets the CPU encoder on an NVIDIA card under 24 GB (the GPU encoder cost 3-5% of text speed on
+    16 GB cards, 35-60% on an RTX 4080 SUPER under Windows); --vision gpu is kept with a note."""
+
+    def test_yes_follows_the_card(self):
+        f = setup.flash_vision_encoder
+        self.assertEqual(f("yes", {"vram_gb": 12.0}), "cpu")
+        self.assertEqual(f("yes", {"vram_gb": 15.9}), "cpu")
+        self.assertEqual(f("yes", {"vram_gb": 24.0}), "gpu")
+        self.assertEqual(f("yes", {"vram_gb": 32.0}), "gpu")
+        self.assertEqual(f("yes", {}), "gpu")                    # unknown VRAM: the old default
+        self.assertEqual(f("cpu", {"vram_gb": 32.0}), "cpu")
+        self.assertEqual(f("none", {"vram_gb": 16.0}), "none")
+
+    def test_gpu_asked_is_kept_with_a_note(self):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(setup.flash_vision_encoder("gpu", {"vram_gb": 16.0}), "gpu")
+            self.assertEqual(setup.flash_vision_encoder("gpu", {"vram_gb": 32.0}), "gpu")
+        self.assertEqual(out.getvalue().count("kept as you chose"), 1)
+        self.assertIn("#2406", out.getvalue())
 
 
 if __name__ == "__main__":

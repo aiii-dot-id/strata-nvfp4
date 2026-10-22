@@ -20,7 +20,7 @@ from pathlib import Path
 # --rope-scaling, kept together with --rope-scale), ("count", lo, hi) for a whole number the page offers as a list.
 EDITABLE = [
     ("sampling.temperature", ("sampling", "num>=0"),
-     "Default temperature for requests that send none (0 = greedy, the default without a sampling block)"),
+     "Default temperature for requests that send none (0 = greedy; without it the model card's: 1.0 thinking, 0.7 not)"),
     ("sampling.top_p", ("sampling", "0<x<=1"), "Default top_p for requests that send none"),
     ("sampling.top_k", ("sampling", "1..64"), "Default top_k for requests that send none (1-64)"),
     ("sampling.min_p", ("sampling", "0<=x<=1"), "Default min_p for requests that send none"),
@@ -30,7 +30,7 @@ EDITABLE = [
      "Disable censorship switch or the API field \"uncensored\" still decide per request. Only where setup loaded "
      "it (the original Qwen), never for NVIDIA's model"),
     ("reasoning_budget_tokens", "int>=0", "Cap the thinking of every request at this many tokens (0 or empty: no cap)"),
-    ("fit_max_tokens", "bool", "Shorten a max_tokens that does not fit the context instead of answering 400"),
+    ("fit_max_tokens", "bool", "Shorten a max_tokens that does not fit the context (on by default); off: answer 400 like llama.cpp"),
     ("anthropic_thinking", ("enum", ["model", "on_request"]),
      "Anthropic requests that do not ask for thinking: think as the model does (model) or not (on_request)"),
     ("effort_position", ("enum", ["start", "end"]),
@@ -41,6 +41,10 @@ EDITABLE = [
     ("engine_silence_s", "num>=0", "End a request when the engine says nothing for this long (default 300 s, 0 = wait)"),
     ("api_monitor", "bool", "Keep the last 100 requests' prompts and answers in memory for /api-monitor"),
     ("open_browser", "bool", "Open the chat page in the browser when the model is ready"),
+    # this fork: the start's update notice (serve/server.py start_update_check)
+    ("update_check", "bool",
+     "Say when a newer strata-nvfp4 release is published (GitHub is asked at most once a day; on by default; nothing "
+     "is downloaded or installed)"),
     ("vram_reserve_mib", ("arg", "--vram-reserve-mib"),
      "VRAM in MiB the engine leaves free for other programs (engine default 700)"),
     # this fork: dialogs at once (server.parallel_args: "parallel": N -> --batch N; 1 or absent: one at a time)
@@ -79,7 +83,8 @@ SECTIONS = {"sampling.temperature": "Sampling defaults", "reasoning_budget_token
             "idle_unload_s": "Loading and the engine", "parallel": "Dialogs", "max_context": "Context"}
 # what an empty field means, where "default" says too little (the page's placeholder / first choice)
 DEFAULTS = {"conversation_cache_slots": "default: 4", "conversation_cache_mib": "off", "conversation_disk_dir": "off",
-            "conversation_disk_mib": "default: 32768", "conversation_disk_persist": "default: off"}
+            "conversation_disk_mib": "default: 32768", "conversation_disk_persist": "default: off",
+            "update_check": "default: on"}
 TRAINED_CTX = 262144      # the model's trained context (Qwen3.8-Flash-Next: every family setup installs)
 CONTEXTS = [8192, 32768, 65536, 131072, 204800, 262144, 393216, 524288]   # setup.py's CONTEXTS
 DIALOG_KEYS = ("conversation_cache_slots", "conversation_cache_mib", "conversation_disk_dir", "conversation_disk_mib",

@@ -1,6 +1,7 @@
 // src/core/pinned.cu - P2.S1: the pinned host arena and the parallel expert load.
 #include "strata/core/pinned.hpp"
 #include "strata/platform/memory.hpp"
+#include "strata/core/pin_budget.hpp"
 
 #include <cuda_runtime.h>
 
@@ -558,7 +559,7 @@ void register_per_stage(PinnedArena& a, const std::vector<uint64_t>& bounds, uin
                 stop = b;
                 continue;
             }
-            const cudaError_t e = cudaHostRegister((uint8_t*) a.base + off, (size_t) len, cudaHostRegisterMapped);
+            const cudaError_t e = pin_register((uint8_t*) a.base + off, (size_t) len, cudaHostRegisterMapped);
             if (e != cudaSuccess) {
                 (void) cudaGetLastError();
                 stop = std::string("the driver refused a slice (") + cudaGetErrorString(e) + ")";
@@ -635,7 +636,7 @@ PinnedArena::PinnedArena(uint64_t bytes, const std::vector<uint64_t>& bounds,
         }
         const bool capped = cap > 0 && cap < bytes && bounds.size() >= 2;
         const cudaError_t e = capped ? cudaSuccess :
-            cudaHostRegister(base, (size_t) bytes, cudaHostRegisterPortable | cudaHostRegisterMapped);
+            pin_register(base, (size_t) bytes, cudaHostRegisterPortable | cudaHostRegisterMapped);
         if (!capped && e == cudaSuccess) {
             note = "cudaHostRegister PORTABLE ok; " + note;
             registered_bytes = bytes;
@@ -662,7 +663,7 @@ PinnedArena::PinnedArena(uint64_t bytes, const std::vector<uint64_t>& bounds,
                     if (i < 0 || (size_t) i + 1 >= bounds.size() || slice_pinned[(size_t) i]) continue;
                     const uint64_t off = bounds[(size_t) i], n = bounds[(size_t) i + 1] - bounds[(size_t) i];
                     if (total + n > limit) continue;
-                    if (cudaHostRegister((uint8_t*) base + off, (size_t) n, cudaHostRegisterPortable | cudaHostRegisterMapped) != cudaSuccess) {
+                    if (pin_register((uint8_t*) base + off, (size_t) n, cudaHostRegisterPortable | cudaHostRegisterMapped) != cudaSuccess) {
                         (void) cudaGetLastError();
                         break;
                     }
@@ -678,7 +679,7 @@ PinnedArena::PinnedArena(uint64_t bytes, const std::vector<uint64_t>& bounds,
             for (size_t i = 0; i + 1 < bounds.size(); ++i) {
                 const uint64_t off = bounds[i], n = bounds[i + 1] - bounds[i];
                 if (limited && (off > limit || n > limit - off)) break;
-                if (cudaHostRegister((uint8_t*) base + off, (size_t) n, cudaHostRegisterPortable | cudaHostRegisterMapped) != cudaSuccess) {
+                if (pin_register((uint8_t*) base + off, (size_t) n, cudaHostRegisterPortable | cudaHostRegisterMapped) != cudaSuccess) {
                     (void) cudaGetLastError();
                     break;
                 }
@@ -813,7 +814,7 @@ PinnedArena::PinnedArena(uint64_t bytes, ByNeed, const std::vector<std::pair<uin
         if (it != done.end() && it->first < b) b = it->first;
         if (a >= b) continue;
         if (cap > 0 && total + (b - a) > cap) { capped = true; break; }
-        if (cudaHostRegister((uint8_t*) base + a, (size_t) (b - a), cudaHostRegisterPortable | cudaHostRegisterMapped) !=
+        if (pin_register((uint8_t*) base + a, (size_t) (b - a), cudaHostRegisterPortable | cudaHostRegisterMapped) !=
             cudaSuccess) {
             (void) cudaGetLastError();
             refused = 1;
@@ -869,7 +870,7 @@ void PinnedArena::register_slices(std::atomic<int>& ready) {
     int i = 0;
     for (; base != nullptr && i < n; ++i) {
         const uint64_t off = bounds_[(size_t) i], len = bounds_[(size_t) i + 1] - off;
-        if (cudaHostRegister((uint8_t*) base + off, (size_t) len, cudaHostRegisterPortable | cudaHostRegisterMapped) !=
+        if (pin_register((uint8_t*) base + off, (size_t) len, cudaHostRegisterPortable | cudaHostRegisterMapped) !=
             cudaSuccess) {
             (void) cudaGetLastError();
             break;
@@ -898,7 +899,7 @@ void PinnedArena::register_slices(std::atomic<int>& ready) {
 PinnedArena::~PinnedArena() {
     if (base && by_need) {
         for (const auto& r : locked_ranges) strata::platform::unlock_resident((uint8_t*) base + r.first, r.second);
-        for (const auto& r : pin_ranges) cudaHostUnregister((uint8_t*) base + r.first);
+        for (const auto& r : pin_ranges) pin_unregister((uint8_t*) base + r.first);
         release(mapping_base ? mapping_base : base, mapping_bytes ? mapping_bytes : capacity);
         base = nullptr;
         mapping_base = nullptr;
@@ -916,14 +917,14 @@ PinnedArena::~PinnedArena() {
             if (cudaGetDevice(&prev) != cudaSuccess) { (void) cudaGetLastError(); prev = 0; }
             for (size_t k = 0; k < slice_starts.size(); ++k) {
                 if (k < reg_dev.size()) cudaSetDevice(reg_dev[k]);
-                cudaHostUnregister((uint8_t*) base + slice_starts[k]);
+                pin_unregister((uint8_t*) base + slice_starts[k]);
             }
             (void) cudaGetLastError();
             cudaSetDevice(prev);
         } else if (slice_bytes) {
-            for (uint64_t off : slice_starts) cudaHostUnregister((uint8_t*) base + off);
+            for (uint64_t off : slice_starts) pin_unregister((uint8_t*) base + off);
         } else {
-            cudaHostUnregister(base);
+            pin_unregister(base);
         }
         release(mapping_base ? mapping_base : base, mapping_bytes ? mapping_bytes : capacity);
         base = nullptr;
