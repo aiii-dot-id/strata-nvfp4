@@ -7,7 +7,7 @@ import import_calibration as mod
 import capability_tasks as tasks
 from transformers import AutoTokenizer
 SOURCE=Path(os.environ.get('STRATA_CALIBRATION_TEST_SOURCE','/nonexistent'))
-pytestmark=pytest.mark.skipif(not SOURCE.is_dir(),reason='requires retained calibration evidence')
+pytestmark=pytest.mark.skipif(not (SOURCE/'PLAN.json').is_file(),reason='requires retained calibration evidence')
 @pytest.fixture
 def setup(tmp_path):
  old=mod.read(SOURCE/'PLAN.json');new=copy.deepcopy(old)
