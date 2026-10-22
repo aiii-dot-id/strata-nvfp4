@@ -2,7 +2,7 @@
 
 **Qwen3.8-Flash-Next (125B hybrid MoE) with NVFP4 experts on one RTX 20, 30, 40 or 50 card (12 GB of VRAM or more)
 and 64 GB of RAM or more, text and pictures.** A fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), on
-upstream 0.1.44.1. Setup installs, ready-made from Hugging Face, the original Qwen in NVFP4 (our GPTQ, or NVIDIA's
+upstream 0.2.0-beta (its engine, server and setup; not its app or installers). Setup installs, ready-made from Hugging Face, the original Qwen in NVFP4 (our GPTQ, or NVIDIA's
 checkpoint converted), censored as Qwen ships it; on ours an opt-in switch turns the censorship off. Upstream's GGUF
 models are still offered.
 
@@ -51,6 +51,48 @@ files by hand.
 
 ## What's new
 
+- **0.2.0-beta-nvfp4.3: upstream 0.2.0's new interface, in your browser.** The release folder's `start-server.cmd` now also
+  starts upstream Strata's app page on **http://127.0.0.1:8791** once the model is ready, and opens it: chat with
+  pictures and the thinking switch, chats kept by the browser, skills, workspaces and the Monitor with the engine's own
+  numbers. It runs on the folder's own `node\node.exe` and uses the server's model - it starts no engine of its own - and
+  stops with the server. The old page stays at http://127.0.0.1:8080/. `start-ui.cmd <address>` opens it for a model
+  something else runs (a tray); it never wakes a sleeping model except for a chat you send. A run config with
+  `"app_ui": true` starts it with its server wherever that server is started from (a tray: the page lives while the
+  tray's model is loaded), and `"app_ui_open": false` keeps the browser closed. Model downloads, tuning and
+  updates stay where they are (`prepare-model.cmd`, `update.cmd`); upstream's desktop app is not part of it
+  ([details](docs/NVFP4.md#the-new-interface-in-the-browser-2026-10-20-release-020-beta-nvfp43)).
+- **0.2.0-beta-nvfp4.2: this fork updates from this fork.** At start the server asks GitHub, at most once a day,
+  which strata-nvfp4 release is the newest. When it is newer than the installed one, the server's window and the web
+  page's header say so, with the command that updates the folder (`update.cmd` in a release folder, `UPDATE.bat` in a
+  clone). Nothing is downloaded or installed by itself; `STRATA_UPDATE_CHECK=0` or `"update_check": false` turns the
+  check off. `strata update` without `--feed` now runs this fork's updater instead of refusing; upstream's signed
+  feed is used only when named. The engine is unchanged
+  ([details](docs/NVFP4.md#strata-update-runs-this-forks-updater-the-start-says-when-a-newer-release-is-out-2026-10-20-release-020-beta-nvfp42)).
+- **On upstream 0.2.0-beta (0.2.0-beta-nvfp4.1).** Upstream's engine, server and setup of 0.1.45 and 0.2.0-beta
+  (the engine says 0.1.45.3) under this fork's NVFP4 models; upstream's new app, Terminal and installers are not part
+  of this release, which stays the Windows zip. One GPU and one dialog give the same bits as 0.1.44.1-nvfp4.2 at 32K
+  and in the kit's identity runs, and decode ~8% faster on the 5090 (203 against 180 tokens/s, 5 of 5 pairs)
+  ([the port and its checks](docs/NVFP4.md#upstream-020-beta-2026-10-19-release-020-beta-nvfp41)). What you get from
+  upstream:
+  - the prompt tokenised from the last shared prefix and cheaper conversation-cache copies (#567/#1852, #1163, #1164),
+    `--conversation-cache-park-gain`, the model card's sampling applied by the server per thinking state (thinking:
+    the 1.0 / 0.95 / 20 setup used to write; not thinking: Qwen's instruct set), pinned memory kept free under Windows
+    while the expert arena pins, so the buffers after it never fail;
+  - in setup: the Gyro family (27.6 and 35 GB), downloads over 8 connections that resume, every file pinned by size and
+    SHA-256, the RAM + VRAM memory tiers for the GGUF default, Qwen3.6-35B-A3B with pictures and several requests;
+  - our earlier pull requests in upstream's form (IMMA prompt attention, the scattered MoE input, the fused up
+    projection, the tier's eviction sync): this fork keeps its defaults on them.
+  This fork's own: setup no longer writes a `"sampling"` block (the server's model card does the same); `--family
+  nvfp4 --model NVFP4-QAD` (upstream's NVIDIA FP4-Local, prepared on the PC) is not offered here; `strata update`
+  (upstream's signed engine feed) needs a feed named explicitly, so an install of this fork never switches to
+  upstream's engine by itself.
+- **0.1.44.1-nvfp4.2: Claude Code's system prompt is rewritten for the local model.** The server recognises Claude
+  Code's prompt by its billing header and drops what only Claude can use: its identity, Anthropic's security
+  policy, the list of Claude model ids, the pronoun rule. The memory how-to is cut to its path. In their place comes a
+  short note for a local agent: call only the listed tools, by their exact names, never as plain text. The harness,
+  context management, plan mode, output styles and every other section pass as sent. The rewrite gives the same text
+  on every turn, so the conversation cache keeps hitting. Claude Code 2.1.296's prompt goes from 1,361 to 676 tokens.
+  `"claude_code_prompt": "as_sent"` in the config keeps it as it comes. The engine is unchanged.
 - **On upstream 0.1.44.1 (0.1.44.1-nvfp4.1).** Upstream's hotfix: CPUs without AVX2 start again (#2324: the NVFP4 CPU
   rows' tables were built before `main` with AVX instructions, an illegal instruction on such a CPU, now none), a
   crashed engine start is named instead of retried as a GPU runtime start, the Responses API (Codex) honours the
@@ -291,11 +333,11 @@ page).
 - **AMD cards:** the NVFP4 models run on NVIDIA cards only, and this fork publishes no AMD engine. For the GGUF models
   setup compiles one on Linux; on Windows build it first with `tools\hip\build_windows.bat`, then run
   `START-HERE.bat --backend hip --prebuilt <its dist folder>` ([docs/AMD_HIP.md](docs/AMD_HIP.md)).
-- **Sampling:** setup writes the model's recommended sampling into `strata-<model>.json` (`"sampling":
-  {"temperature": 1.0, "top_p": 0.95, "top_k": 20}`, Qwen's generation_config.json) as the default for requests;
-  a request's own values win, and temperature 0 means greedy. Before, a client that sent no temperature (Claude
-  Code) decoded greedy, which Qwen advises against with thinking. A setup run again keeps the values you changed;
-  `UPDATE.bat` adds the block to an older config that has none.
+- **Sampling:** a request that sends none gets the model card's sampling from the server (upstream's, since
+  0.2.0-beta-nvfp4.1): with thinking temperature 1.0, top_p 0.95, top_k 20 (Qwen's generation_config.json), without
+  thinking Qwen's instruct set. A request's own values win, and temperature 0 means greedy. A `"sampling"` block in
+  `strata-<model>.json` (setup wrote one from 0.1.41-nvfp4.6 to 0.1.44.1-nvfp4.2, or your own) still wins over the
+  card; setup writes none now and keeps the one an install has.
 - **Options:** `--family qwen-nvidia-nvfp4` picks a model without the menu, `--uncensored on|off` answers the
   censorship question (the switch's default), `--check` says what fits this PC, `--dry-run`
   shows what setup would download, install and write for an NVFP4 model (the engine's arguments too) and changes
@@ -304,6 +346,15 @@ page).
   model files stay. The release also has a stand-alone Windows bundle (`strata-nvfp4-v<version>-windows-x64.zip`) that
   updates itself with `update.cmd`; its `prepare-model.cmd` downloads `qwen-nvfp4-gptq` ready-made, the files and
   revision setup pins, with the same censorship switch, off by default.
+  `strata update` (`python strata.py update`) runs the same updater for the folder it is in: `update.cmd`'s in a
+  release folder, `UPDATE.bat` / `./update.sh` in a clone; `strata update --check` only says whether a newer release
+  (or, in a clone, newer commits) is there. Upstream's signed engine feed is used only when you name it (`--feed`).
+- **Update notice:** at start the server asks GitHub, at most once a day, which strata-nvfp4 release is the newest
+  (one small request, no token, nothing about the PC; the answer is kept in `.update/update-check.json`). When it is
+  newer than the installed one, the server's window says so with the command that updates this folder, and the web
+  page shows a small link in its header (hidden with its x until the next release; About lists it too). Nothing is
+  downloaded or installed by itself. Off: `STRATA_UPDATE_CHECK=0`, or `"update_check": false` in the run config
+  (About > Settings); `--offline` never asks.
 
 ## Requirements
 

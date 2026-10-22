@@ -374,6 +374,177 @@ Tried and dropped:
 - The adaptive tier's swaps spread over every round (24 a round instead of 96 every 4): 1.2% fewer rounds/s.
   Without the tier decode drops 23%. High process priority: no change.
 
+### The new interface in the browser (2026-10-20, release 0.2.0-beta-nvfp4.3)
+
+Upstream 0.2.0 ships a new React app (`apps/host`) inside a desktop program (Tauri). This fork runs the same page in
+the browser instead, as a front end over the server it already has: the server owns the engine, the page only uses it.
+
+- **Start.** In a release folder `start-server.cmd` sets `STRATA_APP_UI=1`; once the model is ready `serve/app_ui.py`
+  starts the App Host (`app\host\server\index.mjs` on the folder's `node\node.exe`, Node.js 24 LTS) on
+  http://127.0.0.1:8791, prints `New interface: http://127.0.0.1:8791  (the old page stays at http://127.0.0.1:8080/)`
+  and opens it. The host gets the server's address and key in its environment (never on a command line), is put in
+  the server's job object and watches the server's process, so it ends with the server however that ends. No
+  `node\node.exe`: one line says so and the old page is the interface. The port is fixed (`STRATA_APP_UI_PORT`
+  changes it) because the page keeps its chats in the browser's storage, per address. In a clone: `npm ci && npm run
+  build` in `apps/host`, Node 24.12+ on PATH, `set STRATA_APP_UI=1` before `run-<model>.bat`.
+- **`start-ui.cmd`** starts only the host, attached to a server something else runs (the tray, a server on another
+  port): `start-ui.cmd http://127.0.0.1:8092/v1` with `STRATA_ATTACH_KEY` or `STRATA_ATTACH_KEY_FILE`; without an
+  address, the folder's config (`STRATA_ATTACH_CONFIG`: its port and `api_key`).
+- **From the run config.** `"app_ui": true` starts the host with the server wherever the server is started from, and
+  `"app_ui_open": false` does not open the browser (`serve/app_ui.py` `config_environ`; the environment's
+  `STRATA_APP_UI` / `STRATA_APP_UI_OPEN` win where set). A tray that starts the server with its model gets the page
+  for as long as the model is loaded; it ends with the server. Chats sent from the page go to the server directly,
+  and the server logs each one, so a tray that reads the log for activity still counts them.
+- **Attach mode** (`apps/host/server/attach.mjs`, set by `STRATA_ATTACH_URL` / `STRATA_ATTACH_CONFIG`) stands in for
+  upstream's engine manager (`native-control.mjs`): the running server is the one loaded model. Its name, context
+  and picture support come from the server's `/health`, which this fork's server answers without the key (`model`,
+  `max_context` - the same values as `/v1/models` and its `meta.n_ctx` - and `images`); another server's
+  `/v1/models` is asked instead. Chats go to its `/v1/chat/completions` with its key, with no sampling of the page's
+  own unless you set it in the page (Expert sampling), so the model card's and the run config's sampling apply - the
+  Qwen set. The projection switch (`experimental_speed_projection`, this fork's uncensor switch) is never sent and
+  the page's "Speed projection" control is hidden: the new interface has no uncensor control, for any model and
+  never for NVIDIA's checkpoints. The Monitor's engine panels and context fill come from the server's `/metrics`.
+  Unload only detaches (the server keeps running; choosing the model again in the chat header re-attaches it).
+- **The doorbell rule.** Behind the tray's proxy a request that carries the key loads the model, and every request
+  through it counts as use. So the host sends the key only within 30 s of the server answering the keyless `/health`
+  or of a chat that finished, asks `/health` (keyless) at start with a growing pause (2 s up to 5 min) until the server
+  first answers and every 2 s while a chat of yours is on its way, reads `/metrics` (keyed) only while a chat runs and
+  30 s after it and each time right after `/health` answered (a model stopped meanwhile gets no key), and sends nothing
+  at all while the page sits idle. Only a chat you send can wake a model; an open
+  page never keeps one from unloading.
+- **Hidden in attach mode:** Models, Tuning and Serving (the routes go to Monitor or Chat), Settings > Engine and
+  Storage, "Manage models", tasks' Run now; without the agent component (upstream's DeepSeek Harness, not bundled):
+  Subagents, the permission modes and Settings > Tools. Always hidden in this fork: the update and roll-back buttons.
+- **Security** (`apps/host/server/fork.mjs`): the host listens on 127.0.0.1 only (`STRATA_BIND` elsewhere stops it;
+  `STRATA_ALLOW_LAN_BIND=1` overrides that, unsupported: the page has no login); requests whose `Host` is not
+  `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` get 421 (DNS rebinding); no CORS headers; upstream's
+  rule that refuses `/api` requests from other sites' pages stays; the host's own `/v1` is off (`STRATA_HOST_V1=1`
+  turns it on); the network share and the Cloudflare tunnel cannot be started; `STRATA_NO_ACQUIRE=1`.
+- **Updates:** About > Check for updates runs `strata_control/fork_release.py`'s check (this fork's GitHub release,
+  its daily cache shared with the server, `STRATA_UPDATE_CHECK=0` or the run config's `"update_check": false`) in the
+  folder's Python; never upstream's release feed. Updating stays `update.cmd` (it refuses while `node\node.exe` runs).
+- **Not here:** downloading, loading, tuning and deleting models, the engine updater, the coding agent (Harness), the
+  desktop window and its updater, LAN use.
+- **Bundle:** `release/make_windows_bundle.py` adds `node\` (the pinned official `node-v24.22.0-win-x64.zip`, its
+  SHA-256 checked against nodejs.org's SHASUMS256.txt and the script, cached in `%LOCALAPPDATA%\strata-nvfp4-build`;
+  `node\LICENSE` and the licences of the page's libraries in THIRD-PARTY-NOTICES.txt) and `app\host\` (the server
+  files and the page built from the lockfile, no source maps, without upstream's GT Walsheim Pro webfonts - a
+  commercial typeface; the page falls back to Segoe UI). `--engine-from <checkout>` takes the engine already built in
+  another checkout of the same engine sources, byte for byte.
+
+### `strata update` runs this fork's updater; the start says when a newer release is out (2026-10-20, release 0.2.0-beta-nvfp4.2)
+
+- **`strata update`** (and `strata components update`) without a named feed runs this fork's own updater for the
+  folder `strata.py` is in: `tools/bundle_update.py` (`update.cmd`'s) in a release folder, `UPDATE.bat` /
+  `./update.sh` (git pull, then `setup.py --update`) in a clone. `--check` changes nothing (in a clone: `git fetch`,
+  the commits the remote is ahead, the newest release); `--force` reinstalls a release folder's release; `--wait` and
+  the flags of upstream's feed (`--app`, `--no-engine`, `--backend`, `--components-dir`, ...) are refused with exit 2,
+  naming `--feed`; `--output json` gives status, installed, latest. A named feed (`--feed`, `STRATA_UPDATE_FEED`, one
+  chosen before) runs upstream's signed-feed update as before.
+- **The update notice:** after "ready", a daemon thread of `serve` (a real engine; not a server the Terminal's or the
+  app's runtime owns, `--owner-fd`, which an engine update's test start is) asks
+  `api.github.com/repos/sergqwer/strata-nvfp4/releases/latest` at most once a day (5 s, no token, no install id; the
+  answer, a failure too, kept in `<install>/.update/update-check.json`, else the per-user state folder) and compares it
+  with the installed version: the engine's `BUILD.json` when it is this fork's, else the source's release
+  (`release/make_windows_bundle.py`'s VERSION). The order is setup's `version_tuple`, now shared from
+  `strata_control/fork_release.py`, plus one tie-break: a final release after its pre-release. Newer: one line in the
+  server's window, `[strata] a newer strata-nvfp4 release is published: v<new> (this is <old>) - close the server and
+  run update.cmd in <folder>; notes: <release page>` (a clone: `UPDATE.bat` / `./update.sh` or `strata update`), and
+  `"update"` in `/metrics` and `/v1/status`: a small link in the web page's header (its x hides it for that release)
+  and a line in About. Nothing is downloaded or installed. Off: `STRATA_UPDATE_CHECK=0`, `"update_check": false` in the
+  run config (About > Settings), `--offline`.
+
+### Upstream 0.2.0-beta (2026-10-19, release 0.2.0-beta-nvfp4.1)
+
+Upstream 0.2.0-beta is an app (Tauri), a Terminal (`strata`) and the engine. This fork ships none of the app, the
+Terminal or upstream's installers: its release stays the Windows zip and setup.py's engine asset. What it takes is the
+engine, the server and setup of upstream 0.1.45 and 0.2.0-beta (the engine reports 0.1.45.3), with this fork's changes
+on top. The port went the usual way (port-fork.md): the fork's 206 commits since 0.1.44.1 cherry-picked onto the tag,
+generate.cpp, setup.py and their tests carried as one 3-way merge each (upstream changed generate.cpp by 2,600 lines).
+
+- **Taken from upstream, ours dropped** (it does the same thing):
+  - setup's `"sampling"` block (0.1.41-nvfp4.6): upstream's server applies the model card's sampling itself, per
+    thinking state (`MODEL_CARD_SAMPLING`; a config without `"arch"` gets Flash-Next's card, so this fork's packs too).
+    Thinking: 1.0 / 0.95 / 20, the values setup wrote; not thinking: Qwen's instruct set. Setup writes no block now; the
+    block an older install has is kept as the user's, and the bundle's config has none.
+  - the prompt encoder from the last shared prefix (#567, #1852: upstream's f13a870d), the re-parked conversation's
+    eighth (#1163), the borrowed checkpoint of a parked conversation (#1164), `--prompt-cache-spread` (#1959);
+  - the IMMA prompt attention (#1367), the MoE input quantized once and scattered (#1368, q8_1 rows; the fork keeps the
+    scatter for its own w4a4x2 rows), the hyper-connection up projection with its mix (#1370), the tier's evictions
+    reaching the device table (#1517): upstream's code in each, this fork's defaults on top (IMMA on, upmix on with
+    compute capability 12.x, the eviction sync where the tier does not wait or the PCIe share admits);
+  - the Linux stager threads off the host's CPU: upstream's `aux_cpus::place_off_host()` does the move now.
+  #1525's two fusions (swiglu + q8_1, combine + hyper-connection write) are not upstream: this fork keeps them.
+- **Reworked on 0.2.0's code:** the expert arena's own thread takes upstream's new pinned-memory reserve (640 + 160 MiB on
+  Windows, so the buffers after the arena never find WDDM's page-lock budget spent); the in-place expert reads sit beside
+  upstream's pointer-table MMQ (`STRATA_MMQ_DIRECT`, opt-in, a build option), never on the same layer; the combine +
+  write fusion writes upstream's FP16 image where a card uses it and is off on HIP; the upmix kernel writes the BF16
+  remainder's low image again, without which this fork's default upmix would not run; `STRATA_ADAPT_CHECKRES` is
+  upstream's name for the fork's `STRATA_ADAPT_FETCH_CHECKRES` (both read); the park rule has upstream's
+  `--conversation-cache-park-gain` and this fork's `STRATA_PARK_REWIND_MAX`; a batch read that gives way keeps the
+  `--batch-max-context` check inside upstream's new `give_way`.
+- **Setup:** one NVFP4 install path, this fork's families, as since 0.1.44. Upstream's `--family nvfp4 --model NVFP4 |
+  NVFP4-NVIDIA` still name qwen-nvfp4-gptq / qwen-nvidia-nvfp4. Upstream 0.2.0's third NVFP4 size, NVFP4-QAD (NVIDIA's
+  Qwen3.8-Flash-Next-FP4-Local, a 102 GB checkpoint turned into a pack on the PC), is refused with a message: this fork
+  does not install it. New from upstream: the Gyro family (agentionai's 27.6 and 35 GB sizes), downloads over 8
+  connections that resume, every file pinned by size and SHA-256 (this fork's UD-Q3_K_XL too), the RAM + VRAM memory
+  tiers for the GGUF default, the AVX2 note on this fork's NVFP4 menu lines (#2347).
+- **The engine update feed.** Upstream's engines now come through a signed feed (`strata update`, the app's Update
+  engine). A strata-nvfp4 install never switches to them by itself: setup, UPDATE.bat and the release's update.cmd take
+  this fork's engine from its own releases; `strata update` in a clone needs a named feed (`--feed`,
+  `STRATA_UPDATE_FEED`) and otherwise stops with the reason (since 2026-10-20 it runs this fork's own updater
+  instead, above); a run config that names upstream's engine component
+  (`"component:strata-engine"`) is said at start. The release folder ships `strata_control` (the server imports it) and
+  no `strata update`.
+- **The release build is reproducible again.** Upstream 0.1.45's Gyro overlay (`cmake/strata_ggml_tq_overlay.cmake`)
+  wrote its patched ggml-cuda headers on every configure, and `release/build-release.cmd` configures on every run, so
+  each bundle recompiled 20 prompt units and relinked `strata.exe`: the same code with a new PE timestamp, never the
+  hash of the build that was checked. The overlay now writes a header only when its text changed (and no longer
+  copies the pinned one over it first); a second configure leaves the build with no work to do.
+- **Not taken:** upstream's default of pictures on (its GPU encoder from 24 GB of VRAM). This fork's NVFP4 setup still
+  asks, with "no" as the default answer, and puts the encoder on the CPU: on these packs the GPU encoder's ~1.4 GB would
+  come out of the expert cache.
+- **Checks** (RTX 5090 + Ryzen 9 9950X3D, 128 GB; release build 25df8824 at ab75809f: portable, 75/86/89/120, CUDA 13.3;
+  the zip's engine 56042c6e is that code relinked by the overlay above, and gives the same bits in the identity runs):
+  - the kit's identity (`--exact --cache 3000`, qwen-nvfp4-gptq): a 2K and a 32K prompt give the same first-token
+    logits and greedy tokens (12 / 20) as 0.1.44.1-nvfp4.x's engine, with every flag off at 262,144 and with
+    `--rope-scaling dynamic` at 524,288;
+  - the port check's own form (`--expert-cache 6000`, CPU share 0.5, PCIe share 0.25): 32K identical to 0.1.44.1-nvfp4.2,
+    2K the same 32 tokens with KL 0.00055 on the first token's logits. Upstream's prompt path borrows 24 more cache slots
+    for its buffers, so other experts are resident during a 2K prompt and the CPU share computes other ones; with the
+    CPU share off the 2K run is identical;
+  - with every default of this fork off, the engine gives upstream 0.2.0-beta's own build's bits (2K and 32K);
+  - decode 203.3 tokens/s against 0.1.44.1-nvfp4.2's 179.5 (medians of 5 interleaved pairs, 1,000 tokens, the
+    expert cache sized by itself; per pair 1.04-1.27x, median 1.08x, 5 of 5): ms a round 13.4 -> 11.9, the cache's
+    hits the same (92.9 / 92.8%);
+  - the engine tests: 142 of 151 pass; the other 9 are upstream's own (4 do not compile with MSVC, 2 need another
+    llama.cpp fork for the Gyro types, 3 need model files); the server's and the tools' tests fail only where
+    clean upstream fails on this PC (the golden configs' CPU threads, a timing-sensitive download test, the MCP
+    server's start / stop tests);
+  - the tray's GPTQ config starts in 14 s through the server and answers; a clean unzip of the release zip starts the
+    way `start-server.cmd` does (a new `.venv-serve` from `requirements-serve.txt`) in 16 s and answers.
+
+### Claude Code's system prompt for the local model (2026-10-15, release 0.1.44.1-nvfp4.2)
+- `serve/frontend.py` `local_claude_code_system`, config `"claude_code_prompt"`: `"local"` (the default) or `"as_sent"`.
+  It acts on a system text that starts with `x-anthropic-billing-header:` and whose first line is Claude Code's
+  identity ("You are Claude Code..." or "You are a Claude agent..."). Anything else is left alone.
+- Dropped: the billing header (so no stamp needs pinning), the identity line, the "You are an agent working with
+  the user..." line, the security-policy paragraph, the pronoun paragraph, the Environment bullets on Claude model
+  ids, Claude Code's apps and Fast mode (an Environment header left empty goes too). The working directory and the
+  platform stay.
+- Shortened: Memory keeps its directory and one paragraph on the file format and MEMORY.md (was ~1.3K characters
+  with an example block).
+- Added in front: a local-agent intro. It says to call only the listed tools, by their exact names, with arguments
+  matching their schemas, never to write a tool call as plain text, and to read a result before acting on it.
+  These target what the local model got wrong before: invented tool names and tool-call XML in the reply text.
+- Passed as sent: Harness, code style, confirming irreversible actions, Session-specific guidance, Context
+  management, and any section the rewrite does not know (plan mode, output styles, hooks).
+- Measured on Claude Code 2.1.296's SDK prompt: 5,821 -> 2,995 characters, 1,361 -> 676 tokens. A live `cllm` brief
+  went from 17,375 to 16,657 input tokens. An 8-turn agent task finished correctly, every file:line it cited right.
+- The output is the same for the same input, so the conversation cache's prefix stays.
+- Tests: serve/test_claude_code_prompt.py has 6. ClaudeCodeBillingStamp now runs `as_sent`, where the stamp is
+  still pinned. The serve suite gives 930 OK.
+
 ### Upstream 0.1.44.1 (2026-10-14, release 0.1.44.1-nvfp4.1)
 
 0.1.44-nvfp4.1 was prepared and not published; this release is it on upstream's hotfix, with three more of this
@@ -2098,7 +2269,7 @@ the rest).
 | `STRATA_COMMIT_SYNC=1` | the verify commit waits for its graph again |
 | `STRATA_GEMM_WARM=0` | cuBLASLt's GEMM kernels load on the first prompt again (default: on the prewarm thread at start) |
 | `STRATA_ADAPT_EVICT_SYNC=0` | the tier's evictions reach the device's table only when its copies land (the old behaviour: with the tier not waiting, a stale activation could be computed) |
-| `STRATA_ADAPT_FETCH_CHECKRES=1` | before each decode window, compare the device's residency table with the host's and count windows that computed a CPU expert without its activation |
+| `STRATA_ADAPT_CHECKRES=1` (or `STRATA_ADAPT_FETCH_CHECKRES=1`, its name here before 0.2.0-beta-nvfp4.1) | before each decode window, compare the device's residency table with the host's and count windows that computed a CPU expert without its activation |
 | `STRATA_UNBUFFERED_LOAD=1\|0` | force the expert reads unbuffered / through the file cache (default: unbuffered only when the cache cannot keep the files) |
 | `STRATA_DEFERRED_REGISTER=1`, `STRATA_ARENA_SYNC=1` | register the arena per layer on a thread ahead of its readers (upstream's opt-in) / load the arena after the dense weights |
 | `STRATA_PLE_READERS=N` | the prompt's PLE rows through N reader threads (default 8 on Windows; 0 = one thread reaps every read) |
